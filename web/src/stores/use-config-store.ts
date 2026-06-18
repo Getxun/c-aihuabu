@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
-export type ApiCallFormat = "openai" | "gemini";
+export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json";
 
 export type ModelChannel = {
     id: string;
@@ -324,14 +324,19 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
 
 function normalizeChannels(config: AiConfig) {
     const persistedChannels = Array.isArray(config.channels) ? config.channels : [];
-    const channels = persistedChannels.map((channel, index) =>
-        createModelChannel({
+    const channels = persistedChannels.map((channel, index) => {
+        let apiFormat = channel.apiFormat;
+        if (apiFormat === "openai" && channel.baseUrl && (channel.baseUrl.toLowerCase().includes("volces.com") || channel.baseUrl.toLowerCase().includes("/api/plan/v3"))) {
+            apiFormat = "volcengine";
+        }
+        return createModelChannel({
             ...channel,
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
             name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
+            apiFormat,
             models: uniqueRawModels(channel.models || []),
-        }),
-    );
+        });
+    });
     if (!channels.length) {
         channels.push(
             createModelChannel({
@@ -355,11 +360,16 @@ function normalizeChannels(config: AiConfig) {
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
-    return apiFormat === "gemini" ? GEMINI_BASE_URL : OPENAI_BASE_URL;
+    if (apiFormat === "gemini") return GEMINI_BASE_URL;
+    if (apiFormat === "volcengine") return "https://ark.cn-beijing.volces.com/api/plan/v3";
+    return OPENAI_BASE_URL;
 }
 
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
-    return apiFormat === "gemini" ? "gemini" : "openai";
+    if (apiFormat === "gemini") return "gemini";
+    if (apiFormat === "volcengine") return "volcengine";
+    if (apiFormat === "openai-json") return "openai-json";
+    return "openai";
 }
 
 function uniqueRawModels(models: string[]) {

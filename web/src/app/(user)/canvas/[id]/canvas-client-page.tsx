@@ -1529,6 +1529,54 @@ function InfiniteCanvasPage() {
         saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
+    const copyNodeImage = useCallback(async (node: CanvasNodeData) => {
+        if (!node.metadata?.content) {
+            message.warning("暂无图片内容可复制");
+            return;
+        }
+
+        try {
+            const content = node.metadata.content;
+            const response = await fetch(content);
+            const blob = await response.blob();
+
+            let pngBlob = blob;
+            if (blob.type !== "image/png") {
+                pngBlob = await new Promise<Blob>((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.onload = () => {
+                        const canvas = document.createElement("canvas");
+                        canvas.width = img.naturalWidth || img.width;
+                        canvas.height = img.naturalHeight || img.height;
+                        const ctx = canvas.getContext("2d");
+                        if (!ctx) {
+                            reject(new Error("Failed to get 2d context"));
+                            return;
+                        }
+                        ctx.drawImage(img, 0, 0);
+                        canvas.toBlob((b) => {
+                            if (b) resolve(b);
+                            else reject(new Error("Failed to convert canvas to blob"));
+                        }, "image/png");
+                    };
+                    img.onerror = () => reject(new Error("Failed to load image"));
+                    img.src = content;
+                });
+            }
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    "image/png": pngBlob,
+                }),
+            ]);
+            message.success("图片已复制到剪贴板");
+        } catch (err) {
+            console.error("Failed to copy image: ", err);
+            message.error("复制图片失败，请检查浏览器权限");
+        }
+    }, [message]);
+
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text) {
@@ -2665,6 +2713,7 @@ function InfiniteCanvasPage() {
                     onGenerateImage={generateImageFromTextNode}
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onDownload={downloadNodeImage}
+                    onCopyImage={copyNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}

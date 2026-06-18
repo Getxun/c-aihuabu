@@ -52,7 +52,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
 
     return (
         <>
-            <span ref={buttonRef} className="inline-flex min-w-0">
+            <span ref={buttonRef} className={`inline-flex min-w-0 ${buttonClassName?.includes("w-full") ? "w-full" : ""} ${buttonClassName?.includes("flex-1") ? "flex-1" : ""}`}>
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
                         {audioVoiceLabel(config.audioVoice)} · {audioFormatLabel(config.audioFormat)} · {audioSpeedLabel(config.audioSpeed)}

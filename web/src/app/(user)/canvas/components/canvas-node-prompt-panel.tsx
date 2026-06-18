@@ -60,6 +60,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     return (
         <div
+            data-canvas-no-pan
             className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
@@ -71,21 +72,28 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
+                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none transition-all focus:border-[#2f80ff] focus:ring-1 focus:ring-[#2f80ff]/30"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
-                placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
+                placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent, mentionReferences.length > 0)}
             />
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="flex flex-1 min-w-0 items-center gap-2 mr-1">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker 
+                                config={config} 
+                                value={config.model} 
+                                onChange={(model) => onConfigChange(node.id, { model })} 
+                                capability="image" 
+                                className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
+                                onMissingConfig={() => openConfigDialog(true)} 
+                            />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
-                                buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
+                                buttonClassName="!h-10 !max-w-[140px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
@@ -93,16 +101,45 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <ModelPicker 
+                                config={config} 
+                                value={config.model} 
+                                onChange={(model) => onConfigChange(node.id, { model })} 
+                                capability="video" 
+                                className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
+                                onMissingConfig={() => openConfigDialog(true)} 
+                            />
+                            <CanvasVideoSettingsPopover 
+                                config={config} 
+                                buttonClassName="!h-10 !max-w-[140px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full" 
+                                onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} 
+                            />
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <ModelPicker 
+                                config={config} 
+                                value={config.model} 
+                                onChange={(model) => onConfigChange(node.id, { model })} 
+                                capability="audio" 
+                                className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
+                                onMissingConfig={() => openConfigDialog(true)} 
+                            />
+                            <CanvasAudioSettingsPopover 
+                                config={config} 
+                                buttonClassName="!h-10 !max-w-[140px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full" 
+                                onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} 
+                            />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
+                        <ModelPicker 
+                            config={config} 
+                            value={config.model} 
+                            onChange={(model) => onConfigChange(node.id, { model })} 
+                            capability="text" 
+                            className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
+                            onMissingConfig={() => openConfigDialog(true)} 
+                        />
                     )}
                 </div>
                 <Button
@@ -159,11 +196,12 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     };
 }
 
-function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
-    if (mode === "video") return "描述要生成的视频内容";
-    if (mode === "audio") return "描述要生成的音频内容";
-    if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容";
-    return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
+function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean, hasReferences = false) {
+    const hint = hasReferences ? "，按 @ 引用连接的图片或视频" : "";
+    if (mode === "video") return `描述要生成的视频内容${hint}`;
+    if (mode === "audio") return `描述要生成的音频内容${hint}`;
+    if (mode === "image") return hasImageContent ? `请输入你想要把这张图修改成什么${hint}` : `描述要生成的图片内容${hint}`;
+    return hasTextContent ? `请输入你想要将本段文本修改成什么${hint}` : `请输入你想要生成的文本内容${hint}`;
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

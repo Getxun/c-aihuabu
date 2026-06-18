@@ -52,8 +52,11 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
-    if (isSeedanceVideoConfig(requestConfig)) {
+    if (requestConfig.apiFormat === "volcengine") {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
+    if (requestConfig.apiFormat === "openai-json") {
+        return createOpenAIJsonVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (videoReferences.length || audioReferences.length) {
         throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考素材");
@@ -64,7 +67,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
-    return task.provider === "seedance" ? pollSeedanceTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
+    return requestConfig.apiFormat === "volcengine" ? pollSeedanceTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
@@ -92,13 +95,73 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     }
 }
 
+async function createOpenAIJsonVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const imageUrls = await Promise.all(references.map(async (image) => resolveSeedanceImageUrl(config, image)));
+    const videoUrls = await Promise.all(videoReferences.map(async (video) => resolveSeedanceVideoUrl(video)));
+    const audioUrls = await Promise.all(audioReferences.map(async (audio) => resolveSeedanceAudioUrl(audio)));
+    
+    const duration = normalizeSeedanceDuration(config.videoSeconds);
+    const ratio = normalizeSeedanceRatio(config.size);
+    const resolution = normalizeSeedanceResolution(config.vquality, modelOptionName(model));
+    const isSeedance = modelOptionName(model).toLowerCase().includes("seedance");
+    
+    const payload: Record<string, any> = {
+        model: modelOptionName(model),
+        prompt: prompt,
+        duration: duration === -1 ? 10 : duration,
+    };
+
+    if (isSeedance) {
+        payload.metadata = {
+            resolution: resolution.toUpperCase(),
+            ratio: ratio === "adaptive" ? "9:16" : ratio,
+            prompt_extend: false,
+            watermark: boolConfig(config.videoWatermark, false),
+        };
+    } else {
+        payload.ratio = ratio === "adaptive" ? "16:9" : ratio;
+        payload.resolution = resolution;
+    }
+
+    if (imageUrls.length > 0) {
+        payload.first_image = imageUrls[0];
+        payload.referenceImages = imageUrls;
+        if (imageUrls.length > 1) {
+            payload.last_image = imageUrls[imageUrls.length - 1];
+        }
+    }
+    if (videoUrls.length > 0) {
+        payload.referenceVideos = videoUrls;
+    }
+    if (audioUrls.length > 0) {
+        payload.referenceAudios = audioUrls;
+    }
+
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        if (!created.id) throw new Error("视频接口没有返回任务 ID");
+        return { id: created.id, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
+            try {
+                const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+                await assertVideoBlob(content.data);
+                return { status: "completed", result: { blob: content.data } };
+            } catch (err) {
+                const videoData = video as any;
+                const directUrl = videoData.url || videoData.video_url || videoData.video?.url || videoData.output?.url;
+                if (directUrl) {
+                    return { status: "completed", result: await videoResultFromUrl(directUrl, options) };
+                }
+                throw err;
+            }
         }
         if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: video.error?.message || "视频生成失败" };
         return { status: "pending" };
@@ -119,7 +182,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         model: modelOptionName(model),
         content,
         ratio: normalizeSeedanceRatio(config.size),
-        resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)),
+        resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)).toUpperCase(),
         duration: normalizeSeedanceDuration(config.videoSeconds),
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         watermark: boolConfig(config.videoWatermark, false),

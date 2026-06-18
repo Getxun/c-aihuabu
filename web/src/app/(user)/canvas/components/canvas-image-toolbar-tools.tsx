@@ -5,7 +5,7 @@ import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scis
 
 import type { CanvasNodeData } from "../types";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "copyPrompt" | "copyImage" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -19,6 +19,7 @@ export type ImageToolHandlers = {
     onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onCopyPrompt: (node: CanvasNodeData) => void;
+    onCopyImage: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
 };
 
@@ -51,6 +52,15 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: "复制生成该图片的提示词",
         icon: () => <Copy className="size-4" />,
         run: (node, handlers) => handlers.onCopyPrompt(node),
+    },
+    {
+        id: "copyImage",
+        defaultVisible: true,
+        panelLabel: "复制图片",
+        label: "复制图片",
+        title: "复制图片到剪贴板",
+        icon: () => <Copy className="size-4" />,
+        run: (node, handlers) => handlers.onCopyImage(node),
     },
     {
         id: "reversePrompt",

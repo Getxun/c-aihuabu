@@ -36,7 +36,9 @@ const modelGroups: ModelGroup[] = [
 
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "OpenAI", value: "openai" },
+    { label: "OpenAI (JSON)", value: "openai-json" },
     { label: "Gemini", value: "gemini" },
+    { label: "火山方舟 (Seedance)", value: "volcengine" },
 ];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
@@ -478,7 +480,10 @@ function uniqueModels(models: string[]) {
 }
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
-    return apiFormat === "gemini" ? "Gemini" : "OpenAI";
+    if (apiFormat === "gemini") return "Gemini";
+    if (apiFormat === "volcengine") return "火山方舟";
+    if (apiFormat === "openai-json") return "OpenAI (JSON)";
+    return "OpenAI";
 }
 
 function formatWebdavTime(value: string) {

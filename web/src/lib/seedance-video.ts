@@ -56,9 +56,9 @@ const seedancePixels = {
     },
 } as const;
 
-export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
+export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl" | "apiFormat">) {
     const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel)) || isArkPlanBaseUrl(requestConfig.baseUrl);
+    return requestConfig.apiFormat === "volcengine" || requestConfig.apiFormat === "openai-json" || isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel));
 }
 
 export function isSeedanceVideoModel(model: string) {

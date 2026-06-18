@@ -1,10 +1,10 @@
 "use client";
 
 import { Check, Search } from "lucide-react";
-import { type UIEvent, useEffect, useState } from "react";
-import { App, Empty, Input, Modal, Spin, Tag } from "antd";
+import { type UIEvent, useEffect, useMemo, useState } from "react";
+import { App, Empty, Input, Modal, Spin } from "antd";
 
-import { ALL_PROMPTS_OPTION } from "@/services/api/prompts";
+import { ALL_PROMPTS_OPTION, CATEGORY_MAP, cleanTag } from "@/services/api/prompts";
 import { cn } from "@/lib/utils";
 import { PromptCard } from "./prompt-card";
 import { usePromptList } from "./use-prompt-list";
@@ -15,6 +15,25 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [selectedCategory, setSelectedCategory] = useState(ALL_PROMPTS_OPTION);
     const { query, items, tags: promptTags, categories: promptCategories } = usePromptList({ keyword, tags: selectedTags, category: selectedCategory, enabled: open });
+
+    const visibleTags = useMemo(() => {
+        const seen = new Set<string>();
+        const result: { id: string; label: string }[] = [];
+        
+        result.push({ id: ALL_PROMPTS_OPTION, label: "全部" });
+        seen.add("全部");
+        
+        for (const tag of promptTags) {
+            if (tag === ALL_PROMPTS_OPTION) continue;
+            const label = cleanTag(tag);
+            if (label && !seen.has(label)) {
+                seen.add(label);
+                result.push({ id: tag, label });
+            }
+        }
+        return result;
+    }, [promptTags]);
+
     const toggleTag = (tag: string) => {
         if (tag === ALL_PROMPTS_OPTION) return setSelectedTags([]);
         setSelectedTags((items) => (items.includes(tag) ? items.filter((item) => item !== tag) : [...items, tag]));
@@ -35,35 +54,69 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
 
     return (
         <Modal title="提示词库" open={open} onCancel={() => onOpenChange(false)} footer={null} width={1040} centered>
-            <div data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
-                <div className="mx-auto max-w-2xl">
-                    <Input size="large" prefix={<Search className="size-4 text-stone-400" />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="按标题查询" />
+            <div data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()} className="pb-2">
+                <div className="mx-auto max-w-2xl mb-5">
+                    <Input 
+                        size="large" 
+                        prefix={<Search className="mr-1.5 size-4 text-stone-400" />} 
+                        value={keyword} 
+                        onChange={(event) => setKeyword(event.target.value)} 
+                        placeholder="输入关键词，搜索标题与描述..." 
+                        allowClear
+                        className="rounded-xl border-stone-200 bg-white/70 dark:border-stone-800 dark:bg-stone-950/50 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all placeholder:text-stone-400"
+                    />
                 </div>
-                <div className="mt-5 grid gap-3">
-                    <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
-                        <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">分类</div>
-                        <div className="flex flex-wrap gap-2">
-                            {promptCategories.map((category) => (
-                                <Tag.CheckableTag key={category} checked={selectedCategory === category} className={cn("prompt-filter-tag", selectedCategory === category && "is-active")} onChange={() => setSelectedCategory(category)}>
-                                    {category}
-                                </Tag.CheckableTag>
-                            ))}
+                
+                {/* Clean, standardized filter interface inside Dialog */}
+                <div className="grid gap-3 bg-stone-50/50 border border-stone-150 p-4 rounded-xl dark:bg-stone-900/10 dark:border-stone-850">
+                    <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
+                        <div className="text-xs font-semibold text-stone-500 dark:text-stone-400">分类</div>
+                        <div className="flex flex-wrap gap-1 bg-stone-100/80 p-0.5 rounded-lg dark:bg-stone-900/60 w-fit border border-stone-200/30 dark:border-stone-800/20">
+                            {promptCategories.map((category) => {
+                                const active = selectedCategory === category;
+                                return (
+                                    <button
+                                        key={category}
+                                        type="button"
+                                        className={cn(
+                                            "px-3 py-1 text-xs font-medium rounded-md transition-all duration-155 cursor-pointer",
+                                            active 
+                                                ? "bg-white text-stone-950 shadow-sm dark:bg-stone-800 dark:text-stone-50 font-semibold" 
+                                                : "text-stone-500 hover:text-stone-855 dark:text-stone-450 dark:hover:text-stone-205"
+                                        )}
+                                        onClick={() => setSelectedCategory(category)}
+                                    >
+                                        {CATEGORY_MAP[category] || category}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
-                        <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">标签</div>
-                        <div className="flex flex-wrap gap-2">
-                            {promptTags.map((tag) => {
-                                const active = tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag);
+                        <div className="pt-1 text-xs font-semibold text-stone-500 dark:text-stone-400">标签</div>
+                        <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto thin-scrollbar">
+                            {visibleTags.map((item) => {
+                                const active = item.id === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(item.id);
                                 return (
-                                    <Tag.CheckableTag key={tag} checked={active} className={cn("prompt-filter-tag", active && "is-active")} onChange={() => toggleTag(tag)}>
-                                        {tag}
-                                    </Tag.CheckableTag>
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        className={cn(
+                                            "px-3 py-1 text-xs rounded-full border transition-all duration-150 cursor-pointer",
+                                            active
+                                                ? "bg-stone-900 border-stone-900 text-white dark:bg-white dark:border-white dark:text-stone-950 font-semibold shadow-sm"
+                                                : "bg-stone-50 border-stone-200/80 text-stone-600 hover:border-stone-300 dark:bg-stone-900/50 dark:border-stone-800/80 dark:text-stone-400 dark:hover:border-stone-700"
+                                        )}
+                                        onClick={() => toggleTag(item.id)}
+                                    >
+                                        {item.label}
+                                    </button>
                                 );
                             })}
                         </div>
                     </div>
                 </div>
+
                 <div className="thin-scrollbar mt-6 max-h-[520px] overflow-y-auto pr-2" data-canvas-no-zoom onScroll={handleListScroll} onWheelCapture={(event) => event.stopPropagation()}>
                     {query.isLoading ? (
                         <div className="flex h-40 items-center justify-center">
