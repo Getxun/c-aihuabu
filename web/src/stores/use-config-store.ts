@@ -56,6 +56,7 @@ export type WebdavSyncConfig = {
     lastSyncedAt: string;
 };
 
+export type ConfigDialogTab = "account" | "channels" | "models" | "preferences" | "webdav";
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
@@ -115,11 +116,13 @@ type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
+    configDialogTab: ConfigDialogTab;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
-    openConfigDialog: (shouldPromptContinue?: boolean) => void;
+    openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigDialogTab) => void;
+    setConfigDialogTab: (tab: ConfigDialogTab) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
 };
@@ -175,6 +178,7 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
+            configDialogTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
                 set((state) => ({
@@ -191,7 +195,8 @@ export const useConfigStore = create<ConfigStore>()(
                     },
                 })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
+            openConfigDialog: (shouldPromptContinue = false, tab) => set({ isConfigOpen: true, shouldPromptContinue, ...(tab ? { configDialogTab: tab } : {}) }),
+            setConfigDialogTab: (configDialogTab) => set({ configDialogTab }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),

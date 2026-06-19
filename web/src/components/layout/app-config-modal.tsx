@@ -2,9 +2,10 @@
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
 import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
+import { createCloudChannel, fetchAccountMe, fetchCloudChannels, loginAccount, logoutAccount, registerAccount, type AccountUser, type CloudModelChannel } from "@/services/api/account";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
@@ -61,22 +62,39 @@ function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProg
 
 export function AppConfigModal() {
     const { message } = App.useApp();
-    const [activeTab, setActiveTab] = useState("channels");
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
+    const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
+    const [accountEmail, setAccountEmail] = useState("");
+    const [accountPassword, setAccountPassword] = useState("");
+    const [accountLoading, setAccountLoading] = useState(false);
+    const [cloudChannels, setCloudChannels] = useState<CloudModelChannel[]>([]);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
+    const configDialogTab = useConfigStore((state) => state.configDialogTab);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
+    const setConfigDialogTab = useConfigStore((state) => state.setConfigDialogTab);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
+
+    useEffect(() => {
+        if (isConfigOpen) void refreshAccount().catch(() => {});
+    }, [isConfigOpen]);
+
+    const refreshAccount = async () => {
+        const data = await fetchAccountMe();
+        setAccountUser(data.user);
+        if (data.user) await refreshCloudChannels();
+        else setCloudChannels([]);
+    };
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
@@ -88,6 +106,61 @@ export function AppConfigModal() {
         if (!ready) return;
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
         clearPromptContinue();
+    };
+
+    const submitAccount = async (mode: "login" | "register") => {
+        setAccountLoading(true);
+        try {
+            const data = mode === "login" ? await loginAccount(accountEmail, accountPassword) : await registerAccount(accountEmail, accountPassword);
+            setAccountUser(data.user);
+            setAccountPassword("");
+            await refreshCloudChannels();
+            window.dispatchEvent(new Event("ai-huabu-account-change"));
+            message.success(mode === "login" ? "已登录" : "账号已创建");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "账号操作失败");
+        } finally {
+            setAccountLoading(false);
+        }
+    };
+
+    const logout = async () => {
+        setAccountLoading(true);
+        try {
+            await logoutAccount();
+            setAccountUser(null);
+            setCloudChannels([]);
+            window.dispatchEvent(new Event("ai-huabu-account-change"));
+            message.success("已退出登录");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "退出失败");
+        } finally {
+            setAccountLoading(false);
+        }
+    };
+
+    const refreshCloudChannels = async () => {
+        const data = await fetchCloudChannels();
+        setCloudChannels(data.channels);
+    };
+
+    const saveLocalChannelToCloud = async (channel: ModelChannel) => {
+        if (!channel.apiKey.trim()) return message.error("该本地渠道没有 API Key");
+        setAccountLoading(true);
+        try {
+            await createCloudChannel({ name: channel.name, baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat, models: channel.models });
+            await refreshCloudChannels();
+            message.success("已保存到云端个人渠道");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存失败");
+        } finally {
+            setAccountLoading(false);
+        }
+    };
+
+    const copyCloudChannelModels = (channel: CloudModelChannel) => {
+        navigator.clipboard?.writeText(channel.models.join("\n")).catch(() => {});
+        message.success("已复制云端渠道模型名；云端 API Key 不会下发到浏览器");
     };
 
     const updateChannels = (channels: ModelChannel[]) => {
@@ -229,9 +302,73 @@ export function AppConfigModal() {
             }
         >
             <Tabs
-                activeKey={activeTab}
-                onChange={setActiveTab}
+                activeKey={configDialogTab}
+                onChange={(key) => setConfigDialogTab(key as typeof configDialogTab)}
                 items={[
+                    {
+                        key: "account",
+                        label: "账号",
+                        children: (
+                            <Form layout="vertical" requiredMark={false}>
+                                <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-semibold">{accountUser ? `已登录：${accountUser.email}` : "登录后可保存云端个人渠道"}</div>
+                                            <div className="mt-1 text-xs leading-5 text-stone-500">未登录时继续使用本地 API Key；登录后可把个人渠道加密保存到服务端，后续用于多端共享和异步任务。</div>
+                                        </div>
+                                        {accountUser ? (
+                                            <Button loading={accountLoading} onClick={() => void logout()}>
+                                                退出登录
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                    {!accountUser ? (
+                                        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto_auto]">
+                                            <Form.Item label="邮箱" className="mb-0">
+                                                <Input value={accountEmail} autoComplete="email" onChange={(event) => setAccountEmail(event.target.value)} />
+                                            </Form.Item>
+                                            <Form.Item label="密码" className="mb-0">
+                                                <Input.Password value={accountPassword} autoComplete="current-password" onChange={(event) => setAccountPassword(event.target.value)} />
+                                            </Form.Item>
+                                            <Form.Item label=" " className="mb-0">
+                                                <Button type="primary" block loading={accountLoading} onClick={() => void submitAccount("login")}>
+                                                    登录
+                                                </Button>
+                                            </Form.Item>
+                                            <Form.Item label=" " className="mb-0">
+                                                <Button block loading={accountLoading} onClick={() => void submitAccount("register")}>
+                                                    注册
+                                                </Button>
+                                            </Form.Item>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="text-sm font-semibold">云端个人渠道</div>
+                                                <Button size="small" loading={accountLoading} icon={<RefreshCw className="size-3.5" />} onClick={() => void refreshCloudChannels()}>
+                                                    刷新
+                                                </Button>
+                                            </div>
+                                            {cloudChannels.map((channel) => (
+                                                <div key={channel.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                                    <div className="min-w-0">
+                                                        <div className="truncate text-sm font-semibold">{channel.name}</div>
+                                                        <div className="mt-1 text-xs text-stone-500">
+                                                            {apiFormatLabel(channel.apiFormat)} · {channel.models.length} 个模型 · Key {channel.apiKeyPreview}
+                                                        </div>
+                                                    </div>
+                                                    <Button size="small" onClick={() => copyCloudChannelModels(channel)}>
+                                                        复制模型
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                            {!cloudChannels.length ? <div className="rounded-lg border border-dashed border-stone-300 p-6 text-center text-sm text-stone-500 dark:border-stone-700">还没有云端个人渠道，可在“渠道”Tab 将本地渠道保存到云端。</div> : null}
+                                        </div>
+                                    )}
+                                </section>
+                            </Form>
+                        ),
+                    },
                     {
                         key: "channels",
                         label: "渠道",
@@ -243,7 +380,7 @@ export function AppConfigModal() {
                                             <CircleAlert className="size-3.5 shrink-0" />
                                             <span className="font-semibold">重要：</span>
                                             <span>新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</span>
-                                            <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
+                                            <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setConfigDialogTab("models")}>
                                                 去模型设置
                                             </Button>
                                         </div>
@@ -268,6 +405,11 @@ export function AppConfigModal() {
                                                     </div>
                                                 </div>
                                                 <div className="flex shrink-0 gap-2">
+                                                    {accountUser ? (
+                                                        <Button size="small" loading={accountLoading} onClick={() => void saveLocalChannelToCloud(channel)}>
+                                                            存云端
+                                                        </Button>
+                                                    ) : null}
                                                     <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
                                                         拉取模型
                                                     </Button>

@@ -67,6 +67,8 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vqu
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const LOG_STORE_KEY = "infinite-canvas:video_generation_logs";
+const MAX_VIDEO_POLL_ATTEMPTS = 120;
+const MAX_CONSECUTIVE_POLL_ERRORS = 6;
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 
 export default function VideoPage() {
@@ -107,6 +109,18 @@ export default function VideoPage() {
 
     useEffect(() => {
         void refreshLogs();
+    }, []);
+
+    useEffect(() => {
+        const resume = () => {
+            if (document.visibilityState === "visible") void refreshLogs();
+        };
+        window.addEventListener("online", resume);
+        document.addEventListener("visibilitychange", resume);
+        return () => {
+            window.removeEventListener("online", resume);
+            document.removeEventListener("visibilitychange", resume);
+        };
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
@@ -292,34 +306,59 @@ export default function VideoPage() {
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        let latestLog = log;
+        let consecutiveErrors = 0;
+        const baseDelay = log.task.provider === "seedance" ? 5000 : 2500;
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+            for (let attempt = 0; attempt < MAX_VIDEO_POLL_ATTEMPTS; attempt += 1) {
+                let state: Awaited<ReturnType<typeof pollVideoGenerationTask>>;
+                try {
+                    state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+                    consecutiveErrors = 0;
+                } catch (error) {
+                    consecutiveErrors += 1;
+                    const errorMessage = error instanceof Error ? error.message : "网络异常，任务查询失败";
+                    latestLog = { ...latestLog, status: "生成中", durationMs: Date.now() - latestLog.createdAt, error: `轮询暂时中断：${errorMessage}` };
+                    setResults([{ id: latestLog.id, status: "pending", error: latestLog.error }]);
+                    await saveLog(latestLog);
+                    if (consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+                        message.warning("网络中断，视频任务已保留为生成中，稍后打开页面会继续查询");
+                        return;
+                    }
+                    await delay(Math.min(baseDelay * consecutiveErrors, 30000));
+                    continue;
+                }
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
                         storageKey: stored.storageKey,
-                        durationMs: Date.now() - log.createdAt,
+                        durationMs: Date.now() - latestLog.createdAt,
                         width: stored.width || 1280,
                         height: stored.height || 720,
                         bytes: stored.bytes,
                         mimeType: stored.mimeType,
                     };
                     setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+                    await saveLog({ ...latestLog, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
                     message.success("视频已生成");
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error("视频生成超时，请稍后重试");
-                await delay(log.task.provider === "seedance" ? 5000 : 2500);
+                if (attempt === MAX_VIDEO_POLL_ATTEMPTS - 1) {
+                    latestLog = { ...latestLog, status: "生成中", durationMs: Date.now() - latestLog.createdAt, error: "任务仍在生成中，稍后打开页面会继续查询" };
+                    setResults([{ id: latestLog.id, status: "pending", error: latestLog.error }]);
+                    await saveLog(latestLog);
+                    message.warning("视频任务耗时较长，已保留为生成中");
+                    return;
+                }
+                await delay(baseDelay);
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            setResults([{ id: latestLog.id, status: "failed", error: errorMessage }]);
+            await saveLog({ ...latestLog, status: "失败", durationMs: Date.now() - latestLog.createdAt, error: errorMessage });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -344,6 +383,7 @@ export default function VideoPage() {
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
+        if (log.status === "生成中" && log.task) void pollGenerationLog(log);
     };
 
     return (
@@ -486,7 +526,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} /> : <PendingVideoCard key={result.id} message={result.error} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -566,12 +606,13 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ message }: { message?: string }) {
     return (
         <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>生成中</span>
+                {message ? <span className="max-w-[80%] text-center text-xs text-amber-600 dark:text-amber-300">{message}</span> : null}
             </div>
         </div>
     );

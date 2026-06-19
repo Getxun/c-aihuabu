@@ -54,9 +54,10 @@ type GenerationLog = {
     imageCount: number;
     size: string;
     quality: string;
-    status: "成功" | "失败";
+    status: "生成中" | "成功" | "失败";
     images: GeneratedImage[];
     thumbnails: string[];
+    error?: string;
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
@@ -159,7 +160,50 @@ export default function ImagePage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const pendingLog = buildLog({
+            prompt: text,
+            model,
+            config: { ...snapshot.config, count: String(generationCount) },
+            references: snapshot.references,
+            durationMs: 0,
+            successCount: 0,
+            failCount: 0,
+            status: "生成中",
+            images: [],
+        });
+        await saveLogAsync(pendingLog);
+
+        const slotImages: Array<GeneratedImage | null> = Array.from({ length: generationCount }, () => null);
+        const slotErrors: Array<string | null> = Array.from({ length: generationCount }, () => null);
+        const updatePendingLog = async (status: GenerationLog["status"], error?: string) => {
+            const images = slotImages.filter((image): image is GeneratedImage => Boolean(image));
+            await saveLogAsync({
+                ...pendingLog,
+                durationMs: performance.now() - batchStartedAt,
+                successCount: images.length,
+                failCount: slotErrors.filter(Boolean).length,
+                status,
+                images,
+                thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+                error,
+            });
+        };
+
+        const tasks = Array.from({ length: generationCount }, (_, index) =>
+            runGenerationSlot(index, snapshot)
+                .then(async (image) => {
+                    const stored = await uploadImage(image.dataUrl);
+                    const storedImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    slotImages[index] = storedImage;
+                    await updatePendingLog("生成中");
+                    return storedImage;
+                })
+                .catch(async (error) => {
+                    slotErrors[index] = error instanceof Error ? error.message : "生成失败";
+                    await updatePendingLog("生成中", slotErrors[index] || undefined);
+                    throw error;
+                }),
+        );
 
         const result = await Promise.allSettled(tasks);
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
@@ -168,25 +212,7 @@ export default function ImagePage() {
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
 
         try {
-            const logImages = await Promise.all(
-                successImages.map(async (image) => {
-                    const stored = await uploadImage(image.dataUrl);
-                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-                }),
-            );
-            saveLog(
-                buildLog({
-                    prompt: text,
-                    model,
-                    config: { ...snapshot.config, count: String(generationCount) },
-                    references: snapshot.references,
-                    durationMs: performance.now() - batchStartedAt,
-                    successCount,
-                    failCount,
-                    status: successCount ? "成功" : "失败",
-                    images: logImages,
-                }),
-            );
+            await updatePendingLog(successCount ? "成功" : "失败", failed?.reason instanceof Error ? failed.reason.message : undefined);
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
             setRunning(false);
@@ -250,8 +276,9 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const saveLogAsync = async (log: GenerationLog) => {
+        await logStore.setItem(log.id, serializeLog(log));
+        await refreshLogs();
     };
 
     const refreshLogs = async () => setLogs(await readStoredLogs());
@@ -265,7 +292,7 @@ export default function ImagePage() {
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setResults(logToResults(log));
     };
 
     const buildRequestSnapshot = () => {
@@ -430,7 +457,7 @@ export default function ImagePage() {
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} message={result.error} />
                                     ),
                                 )}
                             </div>
@@ -541,7 +568,7 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ message }: { message?: string }) {
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div
@@ -554,6 +581,7 @@ function PendingImageCard() {
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>生成中</span>
+                {message ? <span className="max-w-[80%] text-center text-xs text-amber-600 dark:text-amber-300">{message}</span> : null}
             </div>
         </div>
     );
@@ -672,6 +700,9 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         ) : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "生成中" ? "processing" : log.status === "成功" ? "blue" : "red"}>
+                            {log.status}
+                        </Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} 张</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
                             {formatDuration(log.durationMs)}
@@ -732,7 +763,16 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         status: log.status || "成功",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        error: log.error,
     };
+}
+
+function logToResults(log: GenerationLog): GenerationResult[] {
+    const results = log.images.map((image) => ({ id: image.id, status: "success" as const, image }));
+    const missingCount = Math.max(0, (Number(log.config.count) || log.imageCount || results.length) - results.length - log.failCount);
+    const pending = Array.from({ length: missingCount }, () => ({ id: nanoid(), status: "pending" as const, error: log.error }));
+    const failed = Array.from({ length: log.failCount }, () => ({ id: nanoid(), status: "failed" as const, error: log.error || "生成失败" }));
+    return [...results, ...pending, ...failed];
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
@@ -782,6 +822,7 @@ function buildLog({
     failCount,
     status,
     images,
+    error,
 }: {
     prompt: string;
     model: string;
@@ -792,6 +833,7 @@ function buildLog({
     failCount: number;
     status: GenerationLog["status"];
     images: GeneratedImage[];
+    error?: string;
 }): GenerationLog {
     const logConfig = {
         model: config.model,
@@ -818,5 +860,6 @@ function buildLog({
         status,
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        error,
     };
 }
