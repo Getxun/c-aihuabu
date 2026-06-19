@@ -202,6 +202,17 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: 1,
+            migrate: (persistedState: any, version: number) => {
+                if (version < 1) {
+                    if (persistedState && persistedState.config) {
+                        if (persistedState.config.canvasImageCount === "3" || persistedState.config.canvasImageCount === undefined) {
+                            persistedState.config.canvasImageCount = "1";
+                        }
+                    }
+                }
+                return persistedState;
+            },
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
