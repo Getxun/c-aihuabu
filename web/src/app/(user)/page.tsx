@@ -57,6 +57,26 @@ const itemVariants = {
     },
 };
 
+const sentenceVariants = {
+    hidden: {},
+    visible: {
+        transition: {
+            staggerChildren: 0.05,
+            delayChildren: 1.8, // start typing after hero text and cards fade in
+        },
+    },
+};
+
+const letterVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+        opacity: 1,
+        transition: { duration: 0.1 },
+    },
+};
+
+const promptText = "赛博朋克风格的魔法猫咪，手握发光的能量法杖，正在调试复杂的代码全息屏幕，超写实摄影，电影质感";
+
 export default function IndexPage() {
     const [primaryTool] = navigationTools;
 
@@ -211,7 +231,7 @@ export default function IndexPage() {
                     <div className="relative min-h-[380px] lg:h-[420px] flex flex-col lg:block gap-6 lg:gap-0 items-center justify-center">
                         
                         {/* connecting flowline vector graphics */}
-                        <svg className="absolute inset-0 w-full h-full pointer-events-none hidden lg:block" style={{ zIndex: 0 }}>
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none hidden lg:block">
                             {/* line 1: text node to image node */}
                             <motion.path
                                 d="M 288 120 C 340 120, 360 260, 420 260"
@@ -255,11 +275,53 @@ export default function IndexPage() {
                                 animate={{ pathLength: 1 }}
                                 transition={{ delay: 1.4, duration: 1.2, ease: "easeOut" }}
                             />
+
+                            {/* connection point 1: prompt to image intermediate anchor */}
+                            <motion.circle
+                                cx="420"
+                                cy="260"
+                                r="4"
+                                fill="#3b82f6"
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ delay: 1.8, duration: 0.5 }}
+                            />
+                            <motion.circle
+                                cx="420"
+                                cy="260"
+                                r="10"
+                                fill="none"
+                                stroke="rgba(59, 130, 246, 0.4)"
+                                strokeWidth="1.5"
+                                animate={{ scale: [0.8, 1.8, 0.8], opacity: [0.8, 0, 0.8] }}
+                                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                            />
+
+                            {/* connection point 2: image to video final destination anchor */}
+                            <motion.circle
+                                cx="768"
+                                cy="130"
+                                r="4"
+                                fill="#a855f7"
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ delay: 2.1, duration: 0.5 }}
+                            />
+                            <motion.circle
+                                cx="768"
+                                cy="130"
+                                r="10"
+                                fill="none"
+                                stroke="rgba(168, 85, 247, 0.4)"
+                                strokeWidth="1.5"
+                                animate={{ scale: [0.8, 1.8, 0.8], opacity: [0.8, 0, 0.8] }}
+                                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                            />
                         </svg>
 
                         {/* card 1: prompt text node */}
                         <motion.div
-                            className="w-full sm:w-72 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:left-0 lg:top-[10%] z-10 cursor-default select-none hover:shadow-lg transition-shadow duration-300"
+                            className="w-full sm:w-72 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:left-0 lg:top-[10%] cursor-default select-none hover:shadow-lg transition-shadow duration-300"
                             animate={{ y: [0, -4, 0] }}
                             transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
                             whileHover={{ scale: 1.02, rotate: -0.5 }}
@@ -274,16 +336,22 @@ export default function IndexPage() {
                                     <span className="text-[10px] text-emerald-600 dark:text-emerald-500 font-semibold uppercase tracking-wider">Active</span>
                                 </div>
                             </div>
-                            <div className="text-xs leading-relaxed text-stone-700 dark:text-stone-300 bg-stone-100/50 dark:bg-stone-950/40 p-2.5 rounded-lg border border-stone-200/20">
+                            <div className="text-xs leading-relaxed text-stone-700 dark:text-stone-300 bg-stone-100/50 dark:bg-stone-950/40 p-2.5 rounded-lg border border-stone-200/20 min-h-[72px]">
                                 <span className="font-mono text-indigo-500 font-semibold dark:text-indigo-400">/imagine</span>{" "}
-                                赛博朋克风格的魔法猫咪，手握发光的能量法杖，正在调试复杂的代码全息屏幕，超写实摄影，电影质感
+                                <motion.span variants={sentenceVariants} initial="hidden" animate="visible">
+                                    {promptText.split("").map((char, index) => (
+                                        <motion.span key={index} variants={letterVariants}>
+                                            {char}
+                                        </motion.span>
+                                    ))}
+                                </motion.span>
                                 <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-blue-500 animate-caret-blink" />
                             </div>
                         </motion.div>
 
                         {/* card 2: generative image node */}
                         <motion.div
-                            className="w-full sm:w-[230px] rounded-2xl border border-stone-200 bg-stone-50/70 p-3.5 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:left-1/2 lg:top-[45%] lg:-translate-x-1/2 z-10 cursor-default select-none hover:shadow-lg transition-shadow duration-300"
+                            className="w-full sm:w-[230px] rounded-2xl border border-stone-200 bg-stone-50/70 p-3.5 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:left-1/2 lg:top-[45%] lg:-translate-x-1/2 cursor-default select-none hover:shadow-lg transition-shadow duration-300"
                             animate={{ y: [0, 4, 0] }}
                             transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
                             whileHover={{ scale: 1.02, rotate: 0.5 }}
@@ -314,7 +382,7 @@ export default function IndexPage() {
 
                         {/* card 3: video synthesize node */}
                         <motion.div
-                            className="w-full sm:w-72 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:right-0 lg:top-[12%] z-10 cursor-default select-none hover:shadow-lg transition-shadow duration-300"
+                            className="w-full sm:w-72 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 shadow-md backdrop-blur-md dark:border-stone-800/40 dark:bg-stone-900/60 dark:shadow-none lg:absolute lg:right-0 lg:top-[12%] cursor-default select-none hover:shadow-lg transition-shadow duration-300"
                             animate={{ y: [0, -5, 0] }}
                             transition={{ duration: 8.5, repeat: Infinity, ease: "easeInOut" }}
                             whileHover={{ scale: 1.02, rotate: -0.5 }}
