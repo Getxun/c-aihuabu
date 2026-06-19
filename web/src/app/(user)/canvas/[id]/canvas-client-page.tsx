@@ -14,7 +14,7 @@ import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
-import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
+import { getDataUrlByteSize, readImageMeta, sanitizeImageDataUrl } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -1577,6 +1577,42 @@ function InfiniteCanvasPage() {
         }
     }, [message]);
 
+    const sanitizeNodeImageMetadata = useCallback(
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
+                message.warning("暂无图片内容可处理");
+                return;
+            }
+            try {
+                const dataUrl = await sanitizeImageDataUrl(node.metadata.content, { perturb: true });
+                const meta = await readImageMeta(dataUrl);
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === node.id
+                            ? {
+                                  ...item,
+                                  metadata: {
+                                      ...item.metadata,
+                                      content: dataUrl,
+                                      storageKey: undefined,
+                                      naturalWidth: meta.width,
+                                      naturalHeight: meta.height,
+                                      mimeType: meta.mimeType,
+                                      bytes: getDataUrlByteSize(dataUrl),
+                                      metadataSanitized: true,
+                                  },
+                              }
+                            : item,
+                    ),
+                );
+                message.success("已重编码图片并移除文件元数据");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "图片元数据处理失败");
+            }
+        },
+        [message],
+    );
+
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text) {
@@ -2714,6 +2750,7 @@ function InfiniteCanvasPage() {
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onDownload={downloadNodeImage}
                     onCopyImage={copyNodeImage}
+                    onSanitizeMetadata={(node) => void sanitizeNodeImageMetadata(node)}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}

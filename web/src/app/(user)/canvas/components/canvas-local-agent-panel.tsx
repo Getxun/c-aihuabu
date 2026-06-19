@@ -18,8 +18,8 @@ const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
 const AGENT_CONNECT_STEPS = [
     { title: "1. 本机已安装并登录 Codex", text: "先确认本机终端里的 Codex 可以正常使用。", command: "codex --version" },
-    { title: "2. 安装 Canvas Agent", text: "推荐全局安装，后续可以直接运行 canvas-agent。", command: "npm i -g @basketikun/canvas-agent" },
-    { title: "3. 启动本地 Agent", text: "启动后终端会输出 Local URL 和 Connect token。", command: "canvas-agent" },
+    { title: "2. 安装 C-ai Agent", text: "推荐全局安装，后续可以直接运行 c-ai-agent。", command: "npm i -g c-ai-agent" },
+    { title: "3. 启动 C-ai Agent", text: "启动后终端会输出 Local URL 和 Connect token。", command: "c-ai-agent" },
     { title: "4. 回到网页连接", text: "把终端输出的地址和 token 填到下面，点击连接。" },
 ];
 
@@ -106,7 +106,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             errorLoggedRef.current = false;
             connectedRef.current = true;
             setAgentState({ connected: true, activity: "已连接", connectError: "", messages: useCanvasAgentStore.getState().messages.filter((item) => !isConnectionErrorMessage(item)) });
-            message.success("本地 Agent 已连接");
+            message.success("C-ai Agent 已连接");
             void postState(endpoint, token, clientId, snapshotRef.current);
         });
         source.addEventListener("tool_call", (event) => {
@@ -133,7 +133,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
         });
         source.onerror = () => {
             const wasConnected = connectedRef.current;
-            const text = wasConnected ? "本地 Agent 连接失败或已断开" : "连接失败，请检查地址和 token";
+            const text = wasConnected ? "C-ai Agent 连接失败或已断开" : "连接失败，请检查地址和 token";
             if (!errorLoggedRef.current || wasConnected) {
                 addEventLog(wasConnected ? "连接断开" : "连接失败", { endpoint, error: text });
                 message.error(text);
@@ -177,10 +177,10 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
         addEventLog("用户发送", { text, attachments: files.map(({ name, type, size }) => ({ name, type, size })) });
         try {
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })) }) });
-            if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
+            if (!res.ok) throw new Error("C-ai Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
             if (data.threadId) setAgentState({ activeThreadId: data.threadId });
-            addEventLog("本地 Agent 已接收", { status: res.status });
+            addEventLog("C-ai Agent 已接收", { status: res.status });
             files.forEach((item) => {
                 URL.revokeObjectURL(item.url);
                 attachmentUrlsRef.current.delete(item.url);
@@ -294,7 +294,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             return;
         }
         if (!endpoint) {
-            const text = "请填写本地 Agent 地址";
+            const text = "请填写 C-ai Agent 地址";
             setAgentState({ connectError: text });
             message.warning(text);
             return;
@@ -309,7 +309,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             const parsed = new URL(endpoint);
             if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("invalid protocol");
         } catch {
-            const text = "本地 Agent 地址格式不正确";
+            const text = "C-ai Agent 地址格式不正确";
             setAgentState({ connectError: text });
             message.warning(text);
             return;
@@ -622,7 +622,7 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-4">
                 <div>
-                    <div className="text-base font-semibold leading-6">连接本地 Agent</div>
+                    <div className="text-base font-semibold leading-6">连接 C-ai Agent</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
                         本地服务只监听 127.0.0.1，画布通过地址和 token 连接到你电脑上的 Codex。
                     </div>
@@ -743,7 +743,7 @@ function AgentHistoryView({ theme, threads, activeThreadId, workspacePath, loadi
                     })}
                     {!threads.length ? (
                         <div className="px-3 py-8 text-center text-sm" style={{ color: theme.node.muted }}>
-                            {connected ? "当前工作空间还没有对话记录" : "连接本地 Agent 后显示历史记录"}
+                            {connected ? "当前工作空间还没有对话记录" : "连接 C-ai Agent 后显示历史记录"}
                         </div>
                     ) : null}
                 </div>
@@ -790,8 +790,8 @@ function parseEventData<T>(event: Event) {
 
 function formatLogText(logs: AgentEventLog[], context: AgentLogContext) {
     const head = [
-        "Infinite Canvas Agent 诊断日志",
-        `Canvas Agent: ${context.endpoint}`,
+        "C-ai Agent 诊断日志",
+        `C-ai Agent: ${context.endpoint}`,
         `连接: ${context.connected ? "在线" : context.enabled ? "连接中" : "未启用"}`,
         `状态: ${context.activity}`,
         `waiting: ${context.waiting}`,
@@ -856,7 +856,7 @@ function shouldLogAgentEvent(event: AgentEventPayload) {
 }
 
 function isConnectionErrorMessage(item: AgentChatItem) {
-    return item.role === "error" && /连接失败|无法连接本地 Agent|本地 Agent 连接失败/.test(item.text);
+    return item.role === "error" && /连接失败|无法连接本地 Agent|本地 Agent 连接失败|无法连接 C-ai Agent|C-ai Agent 连接失败/.test(item.text);
 }
 
 function toolName(name: string) {
@@ -967,7 +967,7 @@ async function fetchAgentJson<T>(endpoint: string, token: string, path: string, 
     const url = `${endpoint}${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
     const res = await fetch(url, init);
     const data = (await res.json().catch(() => ({}))) as T & { error?: string; msg?: string };
-    if (!res.ok) throw new Error(data.error || data.msg || "本地 Agent 请求失败");
+    if (!res.ok) throw new Error(data.error || data.msg || "C-ai Agent 请求失败");
     return data;
 }
 

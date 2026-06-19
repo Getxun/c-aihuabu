@@ -8,7 +8,7 @@ type CanvasAgentToolResponse = { ok?: boolean; result?: unknown; error?: string 
 
 export async function startMcpServer() {
     const config = loadConfig(true);
-    const server = new McpServer({ name: "canvas-agent", version: VERSION }, { instructions: AGENT_PROMPT });
+    const server = new McpServer({ name: "c-ai-agent", version: VERSION }, { instructions: AGENT_PROMPT });
     toolNames.forEach((name) => registerCanvasTool(server, config, name));
     await server.connect(new StdioServerTransport());
 }

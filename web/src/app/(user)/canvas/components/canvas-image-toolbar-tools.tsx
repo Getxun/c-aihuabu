@@ -1,11 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, Copy, Eraser, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "../types";
 
-export type ImageNodeActionToolId = "copyPrompt" | "copyImage" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "copyPrompt" | "copyImage" | "sanitizeMetadata" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -20,6 +20,7 @@ export type ImageToolHandlers = {
     onViewImage: (node: CanvasNodeData) => void;
     onCopyPrompt: (node: CanvasNodeData) => void;
     onCopyImage: (node: CanvasNodeData) => void;
+    onSanitizeMetadata: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
 };
 
@@ -39,7 +40,7 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v7";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
@@ -61,6 +62,15 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: "复制图片到剪贴板",
         icon: () => <Copy className="size-4" />,
         run: (node, handlers) => handlers.onCopyImage(node),
+    },
+    {
+        id: "sanitizeMetadata",
+        defaultVisible: true,
+        panelLabel: "去元数据",
+        label: "去元数据",
+        title: "重编码图片，移除 EXIF/GPS 等文件元数据",
+        icon: () => <Eraser className="size-4" />,
+        run: (node, handlers) => handlers.onSanitizeMetadata(node),
     },
     {
         id: "reversePrompt",

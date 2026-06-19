@@ -1,10 +1,11 @@
 {
-  "name": "@basketikun/canvas-agent",
+  "name": "c-ai-agent",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "c-ai-agent": "./dist/index.js",
     "canvas-agent": "./dist/index.js"
   },
   "files": [

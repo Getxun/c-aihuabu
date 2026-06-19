@@ -1,4 +1,4 @@
-name: Publish Canvas Agent
+name: Publish C-ai Agent
 
 on:
   push:
