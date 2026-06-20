@@ -58,12 +58,30 @@ const seedancePixels = {
 
 export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl" | "apiFormat">) {
     const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return requestConfig.apiFormat === "volcengine" || requestConfig.apiFormat === "openai-json" || isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel));
+    return requestConfig.apiFormat === "volcengine" || isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel));
 }
 
 export function isSeedanceVideoModel(model: string) {
     const value = model.toLowerCase();
     return value.includes("seedance") || value.includes("doubao-seedance");
+}
+
+export function isGrokImagineVideo15Model(model: string) {
+    return model.toLowerCase().includes("grok-imagine-video-1.5");
+}
+
+export function caiVideoModelCapabilities(model: string) {
+    const value = modelOptionName(model);
+    const isSeedance = isSeedanceVideoModel(value);
+    const isGrok15 = isGrokImagineVideo15Model(value);
+    return {
+        textToVideo: !isGrok15,
+        imageToVideo: true,
+        imageReference: true,
+        firstLastFrame: isSeedance,
+        allAroundReference: isSeedance,
+        requiresImage: isGrok15,
+    };
 }
 
 export function isSeedanceFastModel(model: string) {

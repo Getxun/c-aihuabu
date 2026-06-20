@@ -2516,7 +2516,7 @@ function InfiniteCanvasPage() {
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
-                        const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, videoReferences, audioReferences, { signal: controller.signal });
+                        const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, videoReferences, audioReferences, { signal: controller.signal, videoMode: node.metadata?.videoMode });
                         setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, metadata: { ...node.metadata, ...videoTaskMetadata(task) } } : node)));
                         const state = await waitCanvasVideoTask(generationConfig, task, { signal: controller.signal });
                         if (state.status === "failed") throw new Error(state.error);
@@ -2683,7 +2683,7 @@ function InfiniteCanvasPage() {
                 if (node.type === CanvasNodeType.Video) {
                     const videoReferences = isSeedanceVideoConfig(generationConfig) ? context?.referenceVideos || [] : [];
                     const audioReferences = isSeedanceVideoConfig(generationConfig) ? context?.referenceAudios || [] : [];
-                    const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, videoReferences, audioReferences, { signal: controller.signal });
+                    const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, videoReferences, audioReferences, { signal: controller.signal, videoMode: node.metadata?.videoMode });
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoTaskMetadata(task) } } : item)));
                     const state = await waitCanvasVideoTask(generationConfig, task, { signal: controller.signal });
                     if (state.status === "failed") throw new Error(state.error);

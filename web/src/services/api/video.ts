@@ -3,7 +3,7 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, buildSeedancePromptText, caiVideoModelCapabilities, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildAiApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -17,7 +17,7 @@ type SeedanceTask = {
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; videoMode?: string };
 const VIDEO_GENERATION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
@@ -104,6 +104,7 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = videoReferences.map((video) => resolveCaiPublicUrl(video.url, "参考视频"));
     const audioUrls = audioReferences.map((audio) => resolveCaiPublicUrl(audio.url, "参考音频"));
+    assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
     const ratio = normalizeSeedanceRatio(config.size);
     const payload: Record<string, any> = {
         model: modelOptionName(model),
@@ -116,7 +117,7 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
             watermark: boolConfig(config.videoWatermark, false),
         },
     };
-    appendCaiReferences(payload, imageUrls, videoUrls, audioUrls);
+    appendCaiReferences(payload, model, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -132,6 +133,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = videoReferences.map((video) => resolveCaiPublicUrl(video.url, "参考视频"));
     const audioUrls = audioReferences.map((audio) => resolveCaiPublicUrl(audio.url, "参考音频"));
+    assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
     
     const duration = normalizeSeedanceDuration(config.videoSeconds);
     const ratio = normalizeSeedanceRatio(config.size);
@@ -158,7 +160,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
         payload.resolution = resolution;
     }
 
-    appendCaiReferences(payload, imageUrls, videoUrls, audioUrls);
+    appendCaiReferences(payload, model, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/video/generations"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -477,22 +479,79 @@ function isLikelyCaiVideoChannel(baseUrl: string) {
     }
 }
 
-function appendCaiReferences(payload: Record<string, any>, imageUrls: string[], videoUrls: string[], audioUrls: string[]) {
+function assertCaiVideoMode(model: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
+    const capabilities = caiVideoModelCapabilities(model);
+    const mode = resolveCaiVideoMode(model, imageUrls, videoUrls, audioUrls, videoMode);
+    if (capabilities.requiresImage && !imageUrls.length) throw new Error("grok-imagine-video-1.5-preview 必须连接图片后才能生成视频");
+    if (mode === "text-to-video" && !capabilities.textToVideo) throw new Error("当前模型不支持纯文字生成视频，请先连接图片素材");
+    if (mode === "first-last") {
+        if (!capabilities.firstLastFrame) throw new Error("当前模型不支持首尾帧模式，请切换 Seedance 模型");
+        if (imageUrls.length < 2) throw new Error("首尾帧模式需要连接 2 张图片");
+    }
+    if (mode === "all-around") {
+        if (!capabilities.allAroundReference) throw new Error("当前模型不支持全能参考，请切换 Seedance 模型");
+        if (!imageUrls.length && !videoUrls.length && !audioUrls.length) throw new Error("全能参考需要先连接图片、视频或音频素材");
+        if (imageUrls.length > 4) throw new Error("Seedance 全能参考图片最多 4 张");
+        if (videoUrls.length > 3) throw new Error("Seedance 全能参考视频最多 3 个");
+        if (imageUrls.length + videoUrls.length > 5) throw new Error("Seedance 全能参考图片和视频合计最多 5 个");
+    }
+}
+
+function appendCaiReferences(payload: Record<string, any>, model: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
+    const capabilities = caiVideoModelCapabilities(model);
+    const mode = resolveCaiVideoMode(model, imageUrls, videoUrls, audioUrls, videoMode);
+    if (capabilities.allAroundReference && (mode === "all-around" || mode === "first-last")) {
+        appendSeedanceCaiReferences(payload, imageUrls, videoUrls, audioUrls, mode);
+        return;
+    }
+    if (capabilities.allAroundReference && imageUrls.length > 0) {
+        payload.images = imageUrls;
+        payload.input_reference = imageUrls[0];
+        return;
+    }
+    if (capabilities.requiresImage && imageUrls[0]) {
+        payload.image_url = imageUrls[0];
+        return;
+    }
+    if (imageUrls.length > 0) {
+        payload.input_reference = imageUrls.length === 1 ? imageUrls[0] : imageUrls.slice(0, 7).map((url) => ({ image_url: url }));
+    }
+}
+
+function resolveCaiVideoMode(model: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode: string) {
+    if (videoMode && videoMode !== "text-to-video") return videoMode;
+    const capabilities = caiVideoModelCapabilities(model);
+    if (capabilities.allAroundReference && (videoUrls.length || audioUrls.length)) return "all-around";
+    if (capabilities.requiresImage && imageUrls.length) return "image-to-video";
+    return videoMode || "text-to-video";
+}
+
+function appendSeedanceCaiReferences(payload: Record<string, any>, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode: string) {
+    if (videoMode === "first-last") {
+        payload.metadata = {
+            ...(payload.metadata || {}),
+            media: [
+                { type: "first_frame", url: imageUrls[0] },
+                { type: "last_frame", url: imageUrls[1] },
+            ],
+        };
+        return;
+    }
+    if (videoMode === "all-around") {
+        const media = [
+            ...imageUrls.slice(0, 4).map((url, index) => ({
+                type: "reference_image",
+                url,
+                ...(index === 0 && audioUrls[0] ? { reference_voice: audioUrls[0] } : {}),
+            })),
+            ...videoUrls.slice(0, 3).map((url) => ({ type: "reference_video", url })),
+        ].slice(0, 5);
+        if (media.length) payload.metadata = { ...(payload.metadata || {}), media };
+        return;
+    }
     if (imageUrls.length > 0) {
         payload.images = imageUrls;
         payload.input_reference = imageUrls[0];
-        if (imageUrls.length > 1) {
-            payload.first_image = imageUrls[0];
-            payload.last_image = imageUrls[imageUrls.length - 1];
-        }
-    }
-    if (videoUrls.length > 0) {
-        payload.video = videoUrls[0];
-        payload.referenceVideos = videoUrls;
-    }
-    if (audioUrls.length > 0) {
-        payload.audio = audioUrls[0];
-        payload.audio_url = audioUrls[0];
     }
 }
 

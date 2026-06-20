@@ -21,7 +21,7 @@ type CanvasImageSettingsPopoverProps = {
     autoAdjustOverflow?: boolean;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -64,22 +64,24 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
 
     return (
         <>
-            <span ref={buttonRef} className="inline-flex min-w-0 items-center gap-1.5 select-none">
+            <span ref={buttonRef} className={`inline-flex min-w-0 items-center gap-1.5 select-none ${buttonClassName?.includes("w-full") ? "w-full" : ""} ${buttonClassName?.includes("flex-1") ? "flex-1" : ""}`}>
                 <button
                     type="button"
                     onClick={() => updateOpen(!open)}
-                    className="flex h-7 items-center gap-1 rounded-full border border-gray-200/60 bg-gray-50/50 px-2.5 text-[11px] font-normal text-gray-700 hover:bg-gray-100 transition-colors dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className={buttonClassName || "flex h-7 items-center gap-1 rounded-full border border-gray-200/60 bg-gray-50/50 px-2.5 text-[11px] font-normal text-gray-700 transition-colors hover:bg-gray-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800"}
                 >
                     {isPortrait ? <Smartphone className="size-3 text-gray-400" /> : <Monitor className="size-3 text-gray-400" />}
-                    <span>{imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}</span>
+                    <span className="truncate">{imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}</span>
                 </button>
-                <button
-                    type="button"
-                    onClick={() => updateOpen(!open)}
-                    className="flex size-6 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                >
-                    <Layout className="size-3.5" />
-                </button>
+                {!buttonClassName ? (
+                    <button
+                        type="button"
+                        onClick={() => updateOpen(!open)}
+                        className="flex size-6 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                    >
+                        <Layout className="size-3.5" />
+                    </button>
+                ) : null}
             </span>
             {panel}
         </>
