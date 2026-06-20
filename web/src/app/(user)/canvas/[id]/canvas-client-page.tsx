@@ -1093,10 +1093,10 @@ function InfiniteCanvasPage() {
         });
 
         const layoutedNodes = [...nodes];
-        const startX = 100;
-        const startY = 150;
-        const colPaddingX = 100;
-        const rowPaddingY = 60;
+        const startX = 200;
+        const startY = 200;
+        const colPaddingX = 280;
+        const rowPaddingY = 100;
 
         // Helper to get node dimensions with fallbacks
         const getNodeSize = (node: CanvasNodeData) => {
@@ -1197,8 +1197,8 @@ function InfiniteCanvasPage() {
         const maxIsolatedHeight = isolatedNodesSize.length > 0 ? Math.max(...isolatedNodesSize.map((s) => s.height)) : 240;
 
         const cols = 3;
-        const gridColW = maxIsolatedWidth + colPaddingX;
-        const gridRowH = maxIsolatedHeight + rowPaddingY;
+        const gridColW = maxIsolatedWidth + 150;
+        const gridRowH = maxIsolatedHeight + 100;
 
         const sortedIsolated = [...isolatedNodes].sort((a, b) => a.position.y - b.position.y);
 
@@ -1217,9 +1217,42 @@ function InfiniteCanvasPage() {
             }
         });
 
+        // Auto focus viewport to center all nodes nicely
+        if (layoutedNodes.length > 0) {
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            layoutedNodes.forEach((n) => {
+                const { width, height } = getNodeSize(n);
+                if (n.position.x < minX) minX = n.position.x;
+                if (n.position.x + width > maxX) maxX = n.position.x + width;
+                if (n.position.y < minY) minY = n.position.y;
+                if (n.position.y + height > maxY) maxY = n.position.y + height;
+            });
+
+            const boxW = maxX - minX;
+            const boxH = maxY - minY;
+            
+            const padding = 150;
+            const availW = Math.max(200, size.width - padding * 2);
+            const availH = Math.max(200, size.height - padding * 2);
+
+            const targetK = Math.min(availW / boxW, availH / boxH);
+            const k = Math.min(Math.max(targetK, 0.25), 1.0);
+
+            const centerX = minX + boxW / 2;
+            const centerY = minY + boxH / 2;
+            const x = size.width / 2 - centerX * k;
+            const y = size.height / 2 - centerY * k;
+
+            setViewport({ x, y, k });
+        }
+
         setNodes(layoutedNodes);
         message.success("画布已自动整理");
-    }, [nodes, connections]);
+    }, [nodes, connections, size.width, size.height]);
 
     const undoTidyUp = useCallback(() => {
         if (preLayoutNodes) {

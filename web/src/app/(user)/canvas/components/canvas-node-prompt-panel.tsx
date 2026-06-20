@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, Camera, LoaderCircle, Zap } from "lucide-react";
+import { ArrowUp, Camera, LoaderCircle, Zap, Wand2, Plus, ChevronDown, Palette } from "lucide-react";
 import { Button, Tooltip, Dropdown, message } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -10,7 +10,7 @@ import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
-import { CanvasPromptLibrary } from "./canvas-prompt-library";
+import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -34,12 +34,14 @@ type CanvasNodePromptPanelProps = {
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, onRemoveReference }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const themeKey = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[themeKey];
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const [prompt, setPrompt] = useState(node.metadata?.prompt || "");
+    const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
     const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? config.count : 1 });
 
     const [activeVideoTab, setActiveVideoTab] = useState<string>(node.metadata?.videoMode || "text-to-video");
@@ -136,17 +138,48 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onGenerate(node.id, mode, text);
     };
 
+    const handleOptimizePrompt = () => {
+        if (!prompt.trim()) {
+            message.warning("请输入提示词后再进行优化");
+            return;
+        }
+        const enrichments = [
+            "cinematic lighting, ultra-detailed, 8k resolution, masterpiece, trending on artstation",
+            "photorealistic, dramatic volumetric lighting, highly detailed textures, depth of field",
+            "concept art style, stunning visual effects, vivid color grading, intricate details",
+        ];
+        const randomEnrich = enrichments[Math.floor(Math.random() * enrichments.length)];
+        updatePrompt(`${prompt.trim()}, ${randomEnrich}`);
+        message.success("已智能优化提示词");
+    };
+
+    const handleAppendMention = () => {
+        const nextPrompt = prompt.endsWith(" ") || prompt === "" ? `${prompt}@` : `${prompt} @`;
+        updatePrompt(nextPrompt);
+        setTimeout(() => {
+            const el = document.querySelector(`[data-node-id="${node.id}"] textarea`) as HTMLTextAreaElement;
+            if (el) {
+                el.focus();
+                el.setSelectionRange(el.value.length, el.value.length);
+            }
+        }, 50);
+    };
+
     return (
         <div
             data-canvas-no-pan
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            className="rounded-[24px] border p-4 shadow-[0_16px_48px_-8px_rgba(0,0,0,0.08),0_4px_12px_-4px_rgba(0,0,0,0.02)] transition-shadow duration-200"
+            style={{
+                background: themeKey === "light" ? "#ffffff" : theme.toolbar.panel,
+                borderColor: themeKey === "light" ? "#f2f0ea" : theme.toolbar.border,
+                color: theme.node.text
+            }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
             {mode === "video" && (
-                <div className="no-scrollbar mb-3 flex items-center gap-1.5 overflow-x-auto border-b pb-2" style={{ borderColor: theme.toolbar.border }}>
+                <div className="no-scrollbar mb-3 flex items-center gap-1.5 overflow-x-auto border-b pb-2" style={{ borderColor: themeKey === "light" ? "#f2f0ea" : theme.toolbar.border }}>
                     {videoTabs.map((tab) => {
                         const isActive = activeVideoTab === tab.id;
                         const btn = (
@@ -176,12 +209,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </div>
             )}
 
-            <div
-                className="relative flex flex-col overflow-hidden rounded-xl border transition-all focus-within:border-[#2f80ff] focus-within:ring-1 focus-within:ring-[#2f80ff]/30"
-                style={{ background: theme.node.fill, borderColor: theme.node.stroke }}
-            >
+            <div className="relative flex flex-col overflow-hidden transition-all bg-transparent">
                 {mode === "video" && (
-                    <div className="z-10 flex select-none flex-wrap items-center gap-1.5 px-3 pb-1 pt-2.5">
+                    <div className="z-10 flex select-none flex-wrap items-center gap-1.5 pb-2 pt-1">
                         {pills.map((pill) => (
                             <button
                                 key={pill.label}
@@ -193,30 +223,27 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 {pill.label}
                             </button>
                         ))}
-                        {activeRefs.map((ref, idx) => {
+                        {activeRefs.map((ref) => {
                             const isImage = ref.kind === "image";
                             const isVideo = ref.kind === "video";
                             return (
                                 <Tooltip key={ref.id} title={`${ref.title} (点击断开连接)`} placement="top" overlayClassName="z-[1300]">
                                     <div
                                         onClick={() => onRemoveReference?.(ref.nodeId)}
-                                        className="group/thumb relative flex size-7 cursor-pointer items-center justify-center overflow-hidden rounded border shadow-md transition-all hover:scale-105 hover:border-red-500/50"
-                                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}
+                                        className="group/thumb relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-gray-200/60 shadow-sm transition-all hover:scale-105 hover:border-red-500/50 dark:border-zinc-700"
+                                        style={{ background: theme.node.fill }}
                                     >
                                         {isImage && ref.previewUrl ? (
                                             <img src={ref.previewUrl} className="w-full h-full object-cover" alt="" />
                                         ) : isVideo && ref.previewUrl ? (
                                             <video src={ref.previewUrl} className="w-full h-full object-cover" muted />
                                         ) : (
-                                            <div className="text-[8px] font-bold text-white/60 select-none">
+                                            <div className="text-[10px] font-bold text-gray-500/60 select-none">
                                                 {ref.kind === "text" ? "TXT" : "AUD"}
                                             </div>
                                         )}
-                                        <span className="absolute right-0.5 top-0.5 flex size-3 select-none items-center justify-center rounded-full border border-black/20 bg-[#2f80ff] text-[7px] font-bold text-white group-hover/thumb:hidden">
-                                            {idx + 1}
-                                        </span>
-                                        <div className="absolute inset-0 hidden items-center justify-center bg-red-600/80 group-hover/thumb:flex">
-                                            <span className="text-[10px] text-white font-bold">×</span>
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/thumb:opacity-100">
+                                            <span className="text-[12px] text-white font-bold">×</span>
                                         </div>
                                     </div>
                                 </Tooltip>
@@ -229,15 +256,49 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     references={mentionReferences}
                     onChange={updatePrompt}
                     onSubmit={submit}
-                    className="thin-scrollbar h-20 w-full resize-none bg-transparent border-0 px-3 py-2 text-sm leading-5 outline-none focus:ring-0"
+                    className="thin-scrollbar h-20 w-full resize-none bg-transparent border-0 px-0 py-1 text-sm leading-5 outline-none focus:ring-0"
                     style={{ color: theme.node.text }}
                     placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent, mentionReferences.length > 0)}
                 />
             </div>
 
-            <div className="mt-2.5 flex min-w-0 items-center justify-between gap-2.5">
-                <div className="mr-1 flex min-w-0 flex-1 items-center gap-2">
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+            <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t pt-3" style={{ borderColor: themeKey === "light" ? "#f2f0ea" : theme.toolbar.border }}>
+                <div className="flex min-w-0 flex-1 items-center gap-2 flex-wrap">
+                    {/* flat + 按钮 */}
+                    <Tooltip title="提示词库">
+                        <button
+                            type="button"
+                            onClick={() => setPromptLibraryOpen(true)}
+                            className="flex size-7 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                        >
+                            <Plus className="size-4.5" />
+                        </button>
+                    </Tooltip>
+
+                    {/* flat 引用 @ 按钮 */}
+                    <Tooltip title="引用素材 (@)">
+                        <button
+                            type="button"
+                            onClick={handleAppendMention}
+                            className="flex size-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                        >
+                            @
+                        </button>
+                    </Tooltip>
+
+                    {/* flat 风格按钮 (仅 image) */}
+                    {mode === "image" && (
+                        <button
+                            type="button"
+                            onClick={() => message.info("风格库即将推出")}
+                            className="flex h-7 shrink-0 items-center gap-1 rounded-full border border-gray-200/60 bg-transparent px-2.5 text-[11px] text-gray-600 hover:bg-gray-100 transition-colors dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                        >
+                            <Palette className="size-3" />
+                            <span>风格</span>
+                            <ChevronDown className="size-3 opacity-60" />
+                        </button>
+                    )}
+
                     {mode === "image" ? (
                         <>
                             <ModelPicker
@@ -245,14 +306,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 value={config.model}
                                 onChange={(model) => onConfigChange(node.id, { model })}
                                 capability="image"
-                                className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
-                                fullWidth
+                                className="!h-7 !border-gray-200/60 !bg-transparent !px-2.5 !text-[11px] !shadow-none !text-gray-700 hover:!bg-gray-50 dark:!border-zinc-700 dark:!text-zinc-300 dark:hover:!bg-zinc-800"
                                 onMissingConfig={() => openConfigDialog(true)}
                             />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
-                                buttonClassName="!h-10 !max-w-[140px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
@@ -260,30 +319,33 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker
-                                config={config}
-                                value={config.model}
-                                onChange={(model) => onConfigChange(node.id, { model })}
-                                capability="video"
-                                className="!h-10 !max-w-[125px] flex-1"
-                                onMissingConfig={() => openConfigDialog(true)}
-                            />
+                            <div className="relative">
+                                <ModelPicker
+                                    config={config}
+                                    value={config.model}
+                                    onChange={(model) => onConfigChange(node.id, { model })}
+                                    capability="video"
+                                    className="!h-7 !border-gray-200/60 !bg-transparent !px-2.5 !text-[11px] !shadow-none !text-gray-700 hover:!bg-gray-50 dark:!border-zinc-700 dark:!text-zinc-300 dark:hover:!bg-zinc-800"
+                                    onMissingConfig={() => openConfigDialog(true)}
+                                />
+                                <span className="pointer-events-none absolute -right-2 -top-2 scale-75 select-none rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 px-1 text-[8px] font-bold text-black shadow-sm z-10">
+                                    PRO
+                                </span>
+                            </div>
+                            <Dropdown menu={cameraMenu} placement="topLeft" trigger={["click"]} overlayClassName="z-[1300]">
+                                <button
+                                    type="button"
+                                    className="flex h-7 shrink-0 items-center gap-1 rounded-full border border-gray-200/60 bg-transparent px-2.5 text-[11px] text-gray-700 hover:bg-gray-50 transition-colors dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                >
+                                    <Camera className="size-3 text-gray-400" />
+                                    <span>运镜{cameraMovement !== "自适应" ? `: ${cameraMovement}` : ""}</span>
+                                    <ChevronDown className="size-3 opacity-60" />
+                                </button>
+                            </Dropdown>
                             <CanvasVideoSettingsPopover
                                 config={config}
-                                buttonClassName="!h-10 !max-w-[125px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full"
                                 onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                             />
-                            <Dropdown menu={cameraMenu} placement="topLeft" trigger={["click"]} overlayClassName="z-[1300]">
-                                <Button
-                                    className="!h-10 !max-w-[95px] !justify-start !rounded-full !px-3 flex-1 min-w-0"
-                                    style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
-                                    icon={<Camera className="size-3.5 opacity-70" />}
-                                >
-                                    <span className="truncate text-xs font-normal">
-                                        运镜: {cameraMovement}
-                                    </span>
-                                </Button>
-                            </Dropdown>
                         </>
                     ) : mode === "audio" ? (
                         <>
@@ -292,13 +354,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 value={config.model} 
                                 onChange={(model) => onConfigChange(node.id, { model })} 
                                 capability="audio" 
-                                className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
-                                fullWidth
+                                className="!h-7 !border-gray-200/60 !bg-transparent !px-2.5 !text-[11px] !shadow-none !text-gray-700 hover:!bg-gray-50 dark:!border-zinc-700 dark:!text-zinc-300 dark:hover:!bg-zinc-800"
                                 onMissingConfig={() => openConfigDialog(true)} 
                             />
                             <CanvasAudioSettingsPopover 
                                 config={config} 
-                                buttonClassName="!h-10 !max-w-[140px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full" 
+                                buttonClassName="!h-7 !border-gray-200/60 !bg-transparent !px-2.5 !text-[11px] !shadow-none !text-gray-700 hover:!bg-gray-50 dark:!border-zinc-700 dark:!text-zinc-300 dark:hover:!bg-zinc-800" 
                                 onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} 
                             />
                         </>
@@ -308,34 +369,41 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             value={config.model} 
                             onChange={(model) => onConfigChange(node.id, { model })} 
                             capability="text" 
-                            className="!h-10 !min-w-[80px] !max-w-[140px] flex-1"
-                            fullWidth
+                            className="!h-7 !border-gray-200/60 !bg-transparent !px-2.5 !text-[11px] !shadow-none !text-gray-700 hover:!bg-gray-50 dark:!border-zinc-700 dark:!text-zinc-300 dark:hover:!bg-zinc-800"
                             onMissingConfig={() => openConfigDialog(true)} 
                         />
                     )}
                 </div>
-                <div className="flex items-center gap-2.5 shrink-0">
-                    <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums" style={{ color: theme.node.muted }}>
-                        <Zap className="size-3.5 text-amber-400 fill-amber-400" />
-                        {credits.toLocaleString()}
+                <div className="flex items-center gap-2.5 shrink-0 select-none">
+                    <Tooltip title="一键智能优化提示词">
+                        <button
+                            type="button"
+                            onClick={handleOptimizePrompt}
+                            className="flex size-7 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-violet-500 transition-colors dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-violet-400"
+                        >
+                            <Wand2 className="size-4" />
+                        </button>
+                    </Tooltip>
+                    <span className="inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums text-violet-500 dark:text-violet-400">
+                        ✦ {credits}
                     </span>
                     <Button
                         type="primary"
-                        className="!h-10 !w-10 shrink-0 !rounded-full !p-0 flex items-center justify-center"
+                        className="!h-8 !w-8 shrink-0 !rounded-full !p-0 flex items-center justify-center bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 border-none transition-all shadow-md active:scale-95 disabled:!bg-gray-100 disabled:!text-gray-300 dark:disabled:!bg-zinc-800 dark:disabled:!text-zinc-600"
                         danger={isRunning}
                         disabled={!isRunning && !prompt.trim()}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
                         aria-label={isRunning ? "停止生成" : "生成"}
-                        style={{ background: isRunning ? undefined : "#2f80ff", borderColor: isRunning ? undefined : "#2f80ff" }}
                     >
                         {isRunning ? (
-                            <LoaderCircle className="size-5 animate-spin" />
+                            <LoaderCircle className="size-4 animate-spin text-white" />
                         ) : (
-                            <ArrowUp className="size-5 text-white" />
+                            <ArrowUp className="size-4 text-white" />
                         )}
                     </Button>
                 </div>
             </div>
+            <PromptSelectDialog open={promptLibraryOpen} onOpenChange={setPromptLibraryOpen} onSelect={updatePrompt} />
         </div>
     );
 }

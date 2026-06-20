@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Settings2 } from "lucide-react";
+import { Smartphone, Monitor, Layout } from "lucide-react";
 import { Button } from "antd";
 
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
@@ -21,15 +21,17 @@ type CanvasImageSettingsPopoverProps = {
     autoAdjustOverflow?: boolean;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
+
+    const isPortrait = activeSize.includes("9:16") || activeSize.includes("2:3") || activeSize.includes("3:4");
+
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -62,12 +64,22 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
 
     return (
         <>
-            <span ref={buttonRef} className={`inline-flex min-w-0 ${buttonClassName?.includes("w-full") ? "w-full" : ""} ${buttonClassName?.includes("flex-1") ? "flex-1" : ""}`}>
-                <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
-                    <span className="truncate">
-                        {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)} · {count} 张
-                    </span>
-                </Button>
+            <span ref={buttonRef} className="inline-flex min-w-0 items-center gap-1.5 select-none">
+                <button
+                    type="button"
+                    onClick={() => updateOpen(!open)}
+                    className="flex h-7 items-center gap-1 rounded-full border border-gray-200/60 bg-gray-50/50 px-2.5 text-[11px] font-normal text-gray-700 hover:bg-gray-100 transition-colors dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                    {isPortrait ? <Smartphone className="size-3 text-gray-400" /> : <Monitor className="size-3 text-gray-400" />}
+                    <span>{imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => updateOpen(!open)}
+                    className="flex size-6 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                >
+                    <Layout className="size-3.5" />
+                </button>
             </span>
             {panel}
         </>
