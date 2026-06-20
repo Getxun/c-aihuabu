@@ -57,7 +57,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (requestConfig.apiFormat === "volcengine") {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (requestConfig.apiFormat === "openai-json") {
+    if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) {
         return isCaiSdModel(requestConfig.model) ? createCaiSdVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options) : createCaiStandardVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (videoReferences.length || audioReferences.length) {
@@ -70,7 +70,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (requestConfig.apiFormat === "volcengine") return pollSeedanceTask(requestConfig, task, options);
-    if (requestConfig.apiFormat === "openai-json") return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
+    if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
@@ -466,6 +466,15 @@ async function resolveCaiImageUrl(image: ReferenceImage, options?: RequestOption
 function isCaiSdModel(model: string) {
     const value = modelOptionName(model).toLowerCase();
     return value.includes("seedance") || value.includes("sd");
+}
+
+function isLikelyCaiVideoChannel(baseUrl: string) {
+    try {
+        const host = new URL(baseUrl).hostname.toLowerCase();
+        return host === "ai.772.ee" || host === "api.772.ee" || host.endsWith(".772.ee");
+    } catch {
+        return baseUrl.toLowerCase().includes("772.ee");
+    }
 }
 
 function appendCaiReferences(payload: Record<string, any>, imageUrls: string[], videoUrls: string[], audioUrls: string[]) {

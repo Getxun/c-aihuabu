@@ -1333,24 +1333,16 @@ function InfiniteCanvasPage() {
         [getCanvasCenter],
     );
 
-    const pasteSystemClipboard = useCallback(async () => {
-        if (!navigator.clipboard) return;
-
-        const items = await navigator.clipboard.read();
-        const imageItem = items.find((item) => item.types.some((type) => type.startsWith("image/")));
-        if (imageItem) {
-            const imageType = imageItem.types.find((type) => type.startsWith("image/"));
-            if (!imageType) return;
-            const blob = await imageItem.getType(imageType);
-            const file = new File([blob], "clipboard-image.png", { type: imageType });
+    const pasteClipboardEventImage = useCallback(
+        (clipboardData: DataTransfer | null) => {
+            const file = Array.from(clipboardData?.files || []).find((item) => item.type.startsWith("image/"));
+            if (!file) return false;
             void createImageFileNode(file, getCanvasCenter());
             message.success("已从剪切板添加图片");
-            return;
-        }
-
-        const text = await navigator.clipboard.readText();
-        if (createTextNodeFromClipboard(text)) message.success("已从剪切板添加文本");
-    }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message]);
+            return true;
+        },
+        [createImageFileNode, getCanvasCenter, message],
+    );
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -1389,8 +1381,9 @@ function InfiniteCanvasPage() {
             }
 
             if (isModifierShortcut && !event.altKey && key === "v") {
+                if (!clipboardRef.current?.nodes.length) return;
                 event.preventDefault();
-                if (!pasteCopiedNodes()) void pasteSystemClipboard();
+                pasteCopiedNodes();
                 return;
             }
 
@@ -1419,9 +1412,30 @@ function InfiniteCanvasPage() {
             }
         };
 
+        const handlePaste = (event: ClipboardEvent) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]")) return;
+            if (pasteClipboardEventImage(event.clipboardData)) {
+                event.preventDefault();
+                return;
+            }
+            const text = event.clipboardData?.getData("text/plain");
+            if (text && createTextNodeFromClipboard(text)) {
+                message.success("已从剪切板添加文本");
+                event.preventDefault();
+                return;
+            }
+            if (!pasteCopiedNodes()) return;
+            event.preventDefault();
+        };
+
         window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [copySelectedNodes, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
+        window.addEventListener("paste", handlePaste);
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown);
+            window.removeEventListener("paste", handlePaste);
+        };
+    }, [copySelectedNodes, createTextNodeFromClipboard, deleteConnection, deleteNodes, message, pasteClipboardEventImage, pasteCopiedNodes, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
 
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
