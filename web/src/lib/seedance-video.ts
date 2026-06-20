@@ -70,16 +70,23 @@ export function isGrokImagineVideo15Model(model: string) {
     return model.toLowerCase().includes("grok-imagine-video-1.5");
 }
 
+export function isNewTokenAllAroundVideoModel(model: string) {
+    const value = model.toLowerCase();
+    return value === "video-standard-720p" || value === "video-pro-720p" || value === "video-fast-720p" || value === "veo-omni-flash-video-edit";
+}
+
 export function caiVideoModelCapabilities(model: string) {
     const value = modelOptionName(model);
     const isSeedance = isSeedanceVideoModel(value);
     const isGrok15 = isGrokImagineVideo15Model(value);
+    const isNewTokenAllAround = isNewTokenAllAroundVideoModel(value);
+    const isVeo31 = value.toLowerCase() === "veo-3-1";
     return {
         textToVideo: !isGrok15,
         imageToVideo: true,
         imageReference: true,
-        firstLastFrame: isSeedance,
-        allAroundReference: isSeedance,
+        firstLastFrame: isSeedance || isVeo31,
+        allAroundReference: isSeedance || isNewTokenAllAround || isVeo31,
         requiresImage: isGrok15,
     };
 }

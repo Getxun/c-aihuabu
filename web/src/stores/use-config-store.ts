@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
-export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json";
+export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken";
 
 export type ModelChannel = {
     id: string;
@@ -388,6 +388,7 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
     if (apiFormat === "gemini") return "gemini";
     if (apiFormat === "volcengine") return "volcengine";
     if (apiFormat === "openai-json") return "openai-json";
+    if (apiFormat === "newtoken") return "newtoken";
     return "openai";
 }
 

@@ -54,6 +54,9 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (requestConfig.apiFormat === "newtoken") {
+        return createNewTokenVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
     if (requestConfig.apiFormat === "volcengine") {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
@@ -69,6 +72,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (requestConfig.apiFormat === "newtoken") return pollNewTokenVideoTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "volcengine") return pollSeedanceTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
@@ -97,6 +101,22 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
         return { id: taskId, provider: "openai", model };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
+async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
+    const videoUrls = videoReferences.map((video) => resolveCaiPublicUrl(video.url, "参考视频"));
+    const audioUrls = audioReferences.map((audio) => resolveCaiPublicUrl(audio.url, "参考音频"));
+    const payload = buildNewTokenVideoPayload(config, model, prompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
+
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const taskId = readVideoTaskId(created);
+        if (!taskId) throw new Error("NewToken 接口没有返回任务 ID");
+        return { id: taskId, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "NewToken 视频任务创建失败"));
     }
 }
 
@@ -169,6 +189,28 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
         return { id: taskId, provider: "openai", model };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
+async function pollNewTokenVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const status = normalizeTaskStatus(video.status || video.state || video.task_status);
+        if (status === "completed") {
+            const directUrl = readVideoUrl(video);
+            if (directUrl) return { status: "completed", result: await videoResultFromUrl(directUrl, options) };
+            try {
+                const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+                await assertVideoBlob(content.data);
+                return { status: "completed", result: { blob: content.data } };
+            } catch (err) {
+                throw err;
+            }
+        }
+        if (status === "failed") return { status: "failed", error: video.error?.message || "NewToken 视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "NewToken 视频任务查询失败"));
     }
 }
 
@@ -379,6 +421,77 @@ function normalizeCaiResolution(value: string) {
     return resolution.endsWith("P") ? resolution : `${resolution.replace(/p$/i, "")}P`;
 }
 
+function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
+    const modelName = modelOptionName(model);
+    const lowerModel = modelName.toLowerCase();
+    const aspectRatio = normalizeNewTokenAspectRatio(config.size);
+    const payload: Record<string, any> = {
+        model: modelName,
+        prompt,
+        duration: normalizeNewTokenDuration(config.videoSeconds, lowerModel),
+        aspect_ratio: aspectRatio,
+    };
+
+    if (lowerModel.includes("sora-vip3-pro")) {
+        payload.seconds = String(normalizeNewTokenDuration(config.videoSeconds, lowerModel));
+        payload.resolution = normalizeVideoResolution(config.vquality);
+        if (imageUrls[0]) payload.image = imageUrls[0];
+        return payload;
+    }
+
+    if (lowerModel === "sora-2") {
+        if (imageUrls[0]) payload.image = imageUrls[0];
+        return payload;
+    }
+
+    if (lowerModel === "veo-omni-flash-video-edit") {
+        if (!videoUrls[0]) throw new Error("veo-omni-flash-video-edit 需要连接 1 个参考视频");
+        payload.video_url = videoUrls[0];
+        if (imageUrls.length) payload.Ingredients_images = imageUrls.slice(0, 6);
+        return payload;
+    }
+
+    if (lowerModel === "veo-omni-flash") {
+        if (imageUrls.length) payload.Ingredients_images = imageUrls.slice(0, 6);
+        return payload;
+    }
+
+    if (lowerModel === "veo-3-1") {
+        if (videoMode === "all-around" && imageUrls.length) payload.Ingredients_images = imageUrls.slice(0, 8);
+        else if (imageUrls.length) payload.images = imageUrls.slice(0, videoMode === "first-last" ? 2 : 1);
+        return payload;
+    }
+
+    if (lowerModel === "video-standard-720p" || lowerModel === "video-pro-720p" || lowerModel === "video-fast-720p") {
+        if (imageUrls[0]) payload.image_url = imageUrls[0];
+        if (imageUrls.length > 1) payload.extra_images = imageUrls.slice(1, 10);
+        if (videoUrls.length) payload.extra_videos = videoUrls.slice(0, 3);
+        if (audioUrls.length) payload.extra_audios = audioUrls.slice(0, 3);
+        if (videoMode && videoMode !== "text-to-video") payload.reference_mode = videoMode;
+        return payload;
+    }
+
+    if (imageUrls[0]) payload.image_url = imageUrls[0];
+    if (imageUrls.length > 1) payload.extra_images = imageUrls.slice(1);
+    if (videoUrls.length) payload.extra_videos = videoUrls;
+    if (audioUrls.length) payload.extra_audios = audioUrls;
+    return payload;
+}
+
+function normalizeNewTokenDuration(value: string, model: string) {
+    if (model === "video-standard-720p") return 15;
+    if (model === "veo-omni-flash" || model === "veo-omni-flash-video-edit") return 10;
+    if (model === "veo-3-1") return 8;
+    if (model === "sora-2") return 12;
+    const seconds = Math.floor(Number(value) || 6);
+    return Math.max(4, Math.min(15, seconds));
+}
+
+function normalizeNewTokenAspectRatio(value: string) {
+    const ratio = normalizeSeedanceRatio(value);
+    return ratio === "adaptive" ? "16:9" : ratio;
+}
+
 function unwrapVideoResponse(payload: ApiVideoResponse) {
     return unwrapEnvelope(payload, "接口没有返回视频任务");
 }
@@ -412,18 +525,22 @@ function readVideoUrl(payload: VideoResponse): string {
     const candidates = [
         payload.url,
         payload.video_url,
+        payload.image_url,
         payload.output_url,
         payload.content?.video_url,
         payload.video?.url,
         payload.output?.url,
         payload.result?.url,
+        payload.metadata?.result_urls?.[0],
         payload.data?.url,
         payload.data?.video_url,
+        payload.data?.image_url,
         payload.data?.output_url,
         payload.data?.content?.video_url,
         payload.data?.video?.url,
         payload.data?.output?.url,
         payload.data?.result?.url,
+        payload.data?.metadata?.result_urls?.[0],
         Array.isArray(payload.output) ? payload.output[0]?.url || payload.output[0]?.video_url : undefined,
         Array.isArray(payload.data?.output) ? payload.data.output[0]?.url || payload.data.output[0]?.video_url : undefined,
     ];

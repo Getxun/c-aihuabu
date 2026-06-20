@@ -38,9 +38,12 @@ const modelGroups: ModelGroup[] = [
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "OpenAI", value: "openai" },
     { label: "Cai 专用接口", value: "openai-json" },
+    { label: "NewToken 异步接口", value: "newtoken" },
     { label: "Gemini", value: "gemini" },
     { label: "火山方舟 (Seedance)", value: "volcengine" },
 ];
+
+const newTokenVideoModels = ["video-standard-720p", "video-pro-720p", "video-fast-720p", "sora-2", "sora-vip3-pro-720p", "sora-vip3-pro-1080p", "veo-omni-flash", "veo-omni-flash-video-edit", "veo-3-1"];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
 const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
@@ -173,7 +176,8 @@ export function AppConfigModal() {
 
     const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
         const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        updateChannel(channel.id, { apiFormat, baseUrl });
+        const models = apiFormat === "newtoken" && !channel.models.length ? newTokenVideoModels : channel.models;
+        updateChannel(channel.id, { apiFormat, baseUrl, models });
     };
 
     const addChannel = () => {
@@ -422,6 +426,7 @@ export function AppConfigModal() {
                                                 </Form.Item>
                                                 <Form.Item label="调用格式" className="mb-0">
                                                     <Select value={channel.apiFormat} options={apiFormatOptions} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
+                                                    {channel.apiFormat === "newtoken" ? <div className="mt-1 text-xs leading-5 text-stone-500">按 NewToken 文档使用 JSON 异步协议：创建 <code>POST /v1/videos</code>，查询 <code>GET /v1/videos/{"{task_id}"}</code>，参考素材会按模型自动映射到 <code>image_url</code>、<code>extra_images</code>、<code>Ingredients_images</code> 等字段。</div> : null}
                                                 </Form.Item>
                                                 <Form.Item label="Base URL" className="mb-0">
                                                     <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
@@ -430,6 +435,13 @@ export function AppConfigModal() {
                                                     <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
                                                 </Form.Item>
                                                 <Form.Item label="模型列表" className="mb-0 md:col-span-2">
+                                                    {channel.apiFormat === "newtoken" ? (
+                                                        <div className="mb-2 flex justify-end">
+                                                            <Button size="small" onClick={() => updateChannel(channel.id, { models: newTokenVideoModels })}>
+                                                                填入 NewToken 视频模型
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
                                                     <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
                                                 </Form.Item>
                                             </div>
@@ -636,6 +648,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "volcengine") return "火山方舟";
     if (apiFormat === "openai-json") return "Cai 专用接口";
+    if (apiFormat === "newtoken") return "NewToken 异步接口";
     return "OpenAI";
 }
 

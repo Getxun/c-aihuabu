@@ -2495,8 +2495,8 @@ function InfiniteCanvasPage() {
                 }
 
                 if (mode === "video") {
-                    const videoReferences = isSeedanceVideoConfig(generationConfig) ? generationContext.referenceVideos : [];
-                    const audioReferences = isSeedanceVideoConfig(generationConfig) ? generationContext.referenceAudios : [];
+                    const videoReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceVideos : [];
+                    const audioReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceAudios : [];
                     const videoReferenceContext = { ...generationContext, referenceVideos: videoReferences, referenceAudios: audioReferences };
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
@@ -2681,8 +2681,8 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const videoReferences = isSeedanceVideoConfig(generationConfig) ? context?.referenceVideos || [] : [];
-                    const audioReferences = isSeedanceVideoConfig(generationConfig) ? context?.referenceAudios || [] : [];
+                    const videoReferences = supportsRichVideoReferences(generationConfig) ? context?.referenceVideos || [] : [];
+                    const audioReferences = supportsRichVideoReferences(generationConfig) ? context?.referenceAudios || [] : [];
                     const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, videoReferences, audioReferences, { signal: controller.signal, videoMode: node.metadata?.videoMode });
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoTaskMetadata(task) } } : item)));
                     const state = await waitCanvasVideoTask(generationConfig, task, { signal: controller.signal });
@@ -3628,6 +3628,10 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
 
 function isSeedanceVideoConfig(config: AiConfig) {
     return isSeedanceVideoModel(modelOptionName(config.model || config.videoModel));
+}
+
+function supportsRichVideoReferences(config: AiConfig) {
+    return config.apiFormat === "newtoken" || isSeedanceVideoConfig(config);
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
