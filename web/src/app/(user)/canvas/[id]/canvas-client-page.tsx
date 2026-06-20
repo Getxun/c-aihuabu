@@ -3631,7 +3631,7 @@ function isSeedanceVideoConfig(config: AiConfig) {
 }
 
 function supportsRichVideoReferences(config: AiConfig) {
-    return config.apiFormat === "newtoken" || isSeedanceVideoConfig(config);
+    return config.apiFormat === "newtoken" || config.apiFormat === "duomiapi" || isSeedanceVideoConfig(config);
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {

@@ -863,12 +863,12 @@ function buildLog({ prompt, model, config, references, videoReferences, audioRef
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
     const seedance = isSeedanceVideoConfig({ ...config, model });
-    const newToken = config.apiFormat === "newtoken";
+    const asyncJson = config.apiFormat === "newtoken" || config.apiFormat === "duomiapi";
     return {
         ...config,
         model,
         videoModel: model,
-        size: seedance || newToken ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
+        size: seedance || asyncJson ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
         videoSeconds: normalizeVideoSeconds(config.videoSeconds),
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),

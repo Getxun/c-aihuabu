@@ -16,8 +16,10 @@ type ModelGroup = {
     capability: ModelCapability;
     modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel";
     modelsKey: "imageModels" | "videoModels" | "textModels" | "audioModels";
+    title: string;
     defaultLabel: string;
     optionsLabel: string;
+    hint: string;
 };
 
 type WebdavDomainProgress = {
@@ -29,21 +31,37 @@ type WebdavDomainProgress = {
 };
 
 const modelGroups: ModelGroup[] = [
-    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", defaultLabel: "默认生图模型", optionsLabel: "生图模型可选项" },
-    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", defaultLabel: "默认视频模型", optionsLabel: "视频模型可选项" },
-    { capability: "text", modelKey: "textModel", modelsKey: "textModels", defaultLabel: "默认文本模型", optionsLabel: "文本模型可选项" },
-    { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", defaultLabel: "默认音频模型", optionsLabel: "音频模型可选项" },
+    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", title: "图片模型", defaultLabel: "默认生图", optionsLabel: "可选生图模型", hint: "用于画布生图、图生图和生图工作台。" },
+    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", title: "视频模型", defaultLabel: "默认视频", optionsLabel: "可选视频模型", hint: "用于画布视频节点和视频创作台。" },
+    { capability: "text", modelKey: "textModel", modelsKey: "textModels", title: "文本模型", defaultLabel: "默认文本", optionsLabel: "可选文本模型", hint: "用于助手对话、提示词优化和文本节点。" },
+    { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", title: "音频模型", defaultLabel: "默认音频", optionsLabel: "可选音频模型", hint: "用于语音、旁白和音频生成。" },
 ];
 
-const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
-    { label: "OpenAI", value: "openai" },
-    { label: "Cai 专用接口", value: "openai-json" },
-    { label: "NewToken 异步接口", value: "newtoken" },
-    { label: "Gemini", value: "gemini" },
-    { label: "火山方舟 (Seedance)", value: "volcengine" },
+const apiFormatOptions: Array<{ label: string; options: Array<{ label: string; value: ApiCallFormat }> }> = [
+    {
+        label: "官方接口",
+        options: [
+            { label: "OpenAI", value: "openai" },
+            { label: "Gemini", value: "gemini" },
+            { label: "Volcengine Seedance", value: "volcengine" },
+        ],
+    },
+    {
+        label: "第三方接口",
+        options: [
+            { label: "Cai API", value: "openai-json" },
+            { label: "NewToken API", value: "newtoken" },
+            { label: "Duomi API", value: "duomiapi" },
+        ],
+    },
 ];
 
 const newTokenVideoModels = ["video-standard-720p", "video-pro-720p", "video-fast-720p", "sora-2", "sora-vip3-pro-720p", "sora-vip3-pro-1080p", "veo-omni-flash", "veo-omni-flash-video-edit", "veo-3-1"];
+const duomiModels = [
+    "doubao-seedance-2-0-260128",
+    "grok-video",
+    "grok-video-1.5",
+];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
 const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
@@ -84,7 +102,7 @@ export function AppConfigModal() {
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const setConfigDialogTab = useConfigStore((state) => state.setConfigDialogTab);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
-    const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
+    const modelOptionsFor = (capability: ModelCapability) => filterModelsByCapability(config.models, capability).map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
 
     useEffect(() => {
@@ -176,7 +194,7 @@ export function AppConfigModal() {
 
     const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
         const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        const models = apiFormat === "newtoken" && !channel.models.length ? newTokenVideoModels : channel.models;
+        const models = apiFormat === "duomiapi" ? duomiModels : !channel.models.length && apiFormat === "newtoken" ? newTokenVideoModels : channel.models;
         updateChannel(channel.id, { apiFormat, baseUrl, models });
     };
 
@@ -193,6 +211,11 @@ export function AppConfigModal() {
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
+        if (channel.apiFormat === "duomiapi") {
+            updateChannel(channel.id, { models: duomiModels });
+            message.success("已恢复 Duomi API 已适配模型");
+            return;
+        }
         if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
             message.error("请先填写该渠道的 Base URL 和 API Key");
             return;
@@ -210,16 +233,22 @@ export function AppConfigModal() {
     };
 
     const refreshAllModels = async () => {
-        const runnable = config.channels.filter((channel) => channel.baseUrl.trim() && channel.apiKey.trim());
+        const runnable = config.channels.filter((channel) => channel.apiFormat !== "duomiapi" && channel.baseUrl.trim() && channel.apiKey.trim());
+        const duomiChannels = config.channels.filter((channel) => channel.apiFormat === "duomiapi");
         if (!runnable.length) {
-            message.error("请先填写至少一个渠道的 Base URL 和 API Key");
+            if (duomiChannels.length) {
+                updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : channel)));
+                message.success("已恢复 Duomi API 已适配模型");
+                return;
+            }
+            message.error("请先填写至少一个可拉取渠道的 Base URL 和 API Key");
             return;
         }
         setLoadingChannelId("all");
         try {
             const entries = await Promise.all(runnable.map(async (channel) => [channel.id, await fetchChannelModels(channel)] as const));
             const modelMap = new Map(entries);
-            updateChannels(config.channels.map((channel) => (modelMap.has(channel.id) ? { ...channel, models: modelMap.get(channel.id) || [] } : channel)));
+            updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : modelMap.has(channel.id) ? { ...channel, models: modelMap.get(channel.id) || [] } : channel)));
             message.success("模型列表已更新");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取模型失败");
@@ -229,7 +258,7 @@ export function AppConfigModal() {
     };
 
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
-        const next = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
+        const next = filterModelsByCapability(uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean)), group.capability);
         updateConfig(group.modelsKey, next);
         if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
     };
@@ -414,9 +443,11 @@ export function AppConfigModal() {
                                                             存云端
                                                         </Button>
                                                     ) : null}
-                                                    <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
-                                                        拉取模型
-                                                    </Button>
+                                                    {channel.apiFormat !== "duomiapi" ? (
+                                                        <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
+                                                            拉取模型
+                                                        </Button>
+                                                    ) : null}
                                                     <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteChannel(channel.id)} />
                                                 </div>
                                             </div>
@@ -441,6 +472,13 @@ export function AppConfigModal() {
                                                             </Button>
                                                         </div>
                                                     ) : null}
+                                                    {channel.apiFormat === "duomiapi" ? (
+                                                        <div className="mb-2 flex justify-end">
+                                                            <Button size="small" onClick={() => updateChannel(channel.id, { models: duomiModels })}>
+                                                                恢复 Duomi API 已适配模型
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
                                                     <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
                                                 </Form.Item>
                                             </div>
@@ -456,30 +494,38 @@ export function AppConfigModal() {
                         children: (
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                    <div className="text-sm font-semibold">默认模型和可选项</div>
-                                    <div className="mt-1 text-xs leading-5 text-stone-500">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-semibold">模型用途配置</div>
+                                            <div className="mt-1 text-xs leading-5 text-stone-500">先在“渠道”里维护模型列表，再在这里按图片、视频、文本、音频分配可选项和默认值。</div>
+                                        </div>
+                                        <div className="rounded-md bg-stone-100 px-2 py-1 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-400">渠道模型 {config.models.length} 个</div>
+                                    </div>
+                                    {config.channels.some((channel) => channel.apiFormat === "duomiapi") ? <div className="mt-2 text-xs leading-5 text-stone-500">Duomi API 暂使用已适配模型列表，不需要拉取模型；如果可选项缺失，可回到“渠道”恢复已适配模型。</div> : null}
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => (
-                                        <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
-                                            <Select
-                                                mode="tags"
-                                                showSearch
-                                                allowClear
-                                                maxTagCount="responsive"
-                                                placeholder={config.models.length ? `请选择或输入${group.optionsLabel}` : "先到渠道里填写或拉取模型"}
-                                                value={config[group.modelsKey]}
-                                                options={modelOptions}
-                                                onChange={(models) => updateCapabilityModels(group, models)}
-                                            />
-                                        </Form.Item>
-                                    ))}
-                                </div>
-                                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                    {modelGroups.map((group) => (
-                                        <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
-                                            <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
-                                        </Form.Item>
+                                        <section key={group.modelsKey} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                            <div className="mb-3">
+                                                <div className="text-sm font-semibold">{group.title}</div>
+                                                <div className="mt-1 text-xs text-stone-500">{group.hint}</div>
+                                            </div>
+                                            <Form.Item label={group.defaultLabel} className="mb-3">
+                                                <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
+                                            </Form.Item>
+                                            <Form.Item label={group.optionsLabel} className="mb-0">
+                                                <Select
+                                                    mode="tags"
+                                                    showSearch
+                                                    allowClear
+                                                    maxTagCount="responsive"
+                                                    placeholder={config.models.length ? `请选择或输入${group.optionsLabel}` : "先到渠道里填写或恢复已适配模型"}
+                                                    value={filterModelsByCapability(config[group.modelsKey], group.capability)}
+                                                    options={modelOptionsFor(group.capability)}
+                                                    onChange={(models) => updateCapabilityModels(group, models)}
+                                                />
+                                            </Form.Item>
+                                        </section>
                                     ))}
                                 </div>
                             </Form>
@@ -602,10 +648,10 @@ export function AppConfigModal() {
 
 function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
     const models = modelOptionsFromChannels(channels);
-    const imageModels = keepOrSuggest(config.imageModels, filterModelsByCapability(models, "image"), models);
-    const videoModels = keepOrSuggest(config.videoModels, filterModelsByCapability(models, "video"), models);
-    const textModels = keepOrSuggest(config.textModels, filterModelsByCapability(models, "text"), models);
-    const audioModels = keepOrSuggest(config.audioModels, filterModelsByCapability(models, "audio"), models);
+    const imageModels = keepOrSuggest(config.imageModels, filterModelsByCapability(models, "image"), models, "image");
+    const videoModels = keepOrSuggest(config.videoModels, filterModelsByCapability(models, "video"), models, "video");
+    const textModels = keepOrSuggest(config.textModels, filterModelsByCapability(models, "text"), models, "text");
+    const audioModels = keepOrSuggest(config.audioModels, filterModelsByCapability(models, "audio"), models, "audio");
     return {
         ...config,
         channels,
@@ -624,9 +670,9 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
     };
 }
 
-function keepOrSuggest(current: string[], suggested: string[], allModels: string[]) {
+function keepOrSuggest(current: string[], suggested: string[], allModels: string[], capability: ModelCapability) {
     const available = new Set(allModels);
-    const kept = uniqueModels(current).filter((model) => available.has(model));
+    const kept = uniqueModels(current).filter((model) => available.has(model) && filterModelsByCapability([model], capability).length);
     return kept.length ? kept : suggested;
 }
 
@@ -645,9 +691,10 @@ function uniqueModels(models: string[]) {
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
-    if (apiFormat === "volcengine") return "火山方舟";
-    if (apiFormat === "openai-json") return "Cai 专用接口";
-    if (apiFormat === "newtoken") return "NewToken 异步接口";
+    if (apiFormat === "volcengine") return "Volcengine Seedance";
+    if (apiFormat === "openai-json") return "Cai API";
+    if (apiFormat === "newtoken") return "NewToken API";
+    if (apiFormat === "duomiapi") return "Duomi API";
     return "OpenAI";
 }
 

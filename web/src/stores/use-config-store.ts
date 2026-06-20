@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
-export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken";
+export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken" | "duomiapi";
 
 export type ModelChannel = {
     id: string;
@@ -131,12 +131,12 @@ type ConfigStore = {
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo");
+    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("runway") || value.includes("luma") || value.includes("pika") || value.includes("wan") || value.includes("hailuo");
 }
 
 function isImageModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
+    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney") || value.includes("banana"));
 }
 
 function isAudioModelName(model: string) {
@@ -162,7 +162,7 @@ export function filterModelsByCapability(models: string[], capability?: ModelCap
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     if (!capability) return config.models;
-    return config[modelListKey(capability)];
+    return filterModelsByCapability(config[modelListKey(capability)], capability);
 }
 
 function modelListKey(capability: ModelCapability) {
@@ -381,6 +381,7 @@ function normalizeChannels(config: AiConfig) {
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return GEMINI_BASE_URL;
     if (apiFormat === "volcengine") return "https://ark.cn-beijing.volces.com/api/plan/v3";
+    if (apiFormat === "duomiapi") return "https://duomiapi.com";
     return OPENAI_BASE_URL;
 }
 
@@ -389,6 +390,7 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
     if (apiFormat === "volcengine") return "volcengine";
     if (apiFormat === "openai-json") return "openai-json";
     if (apiFormat === "newtoken") return "newtoken";
+    if (apiFormat === "duomiapi") return "duomiapi";
     return "openai";
 }
 

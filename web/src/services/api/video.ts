@@ -25,12 +25,24 @@ export type VideoGenerationTask = { id: string; provider: "openai" | "seedance";
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
+    if (config.apiFormat === "duomiapi") return duomiApiUrl(config, path);
     return buildAiApiUrl(config.baseUrl, path);
+}
+
+function duomiApiUrl(config: AiConfig, path: string) {
+    const baseUrl = config.baseUrl
+        .trim()
+        .replace(/\/+$/, "")
+        .replace(/\/v1$/i, "")
+        .replace(/\/api\/v3$/i, "");
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    const prefix = normalizedPath.startsWith("/contents/") ? "/api/v3" : "/v1";
+    return `${baseUrl}${prefix}${normalizedPath}`;
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
     return {
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: config.apiFormat === "duomiapi" ? config.apiKey : `Bearer ${config.apiKey}`,
         ...(contentType ? { "Content-Type": contentType } : {}),
     };
 }
@@ -54,6 +66,9 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (requestConfig.apiFormat === "duomiapi") {
+        return createDuomiVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
     if (requestConfig.apiFormat === "newtoken") {
         return createNewTokenVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
@@ -72,6 +87,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (requestConfig.apiFormat === "duomiapi") return pollDuomiVideoTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "newtoken") return pollNewTokenVideoTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "volcengine") return pollSeedanceTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
@@ -117,6 +133,25 @@ async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: 
         return { id: taskId, provider: "openai", model };
     } catch (error) {
         throw new Error(readAxiosError(error, "NewToken 视频任务创建失败"));
+    }
+}
+
+async function createDuomiVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const modelName = modelOptionName(model);
+    const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
+    const videoUrls = videoReferences.map((video) => resolveCaiPublicUrl(video.url, "参考视频"));
+    const audioUrls = audioReferences.map((audio) => resolveCaiPublicUrl(audio.url, "参考音频"));
+    const isGrok = modelName.toLowerCase().includes("grok");
+    const payload = isGrok ? buildDuomiGrokPayload(config, modelName, prompt, imageUrls) : buildDuomiSeedancePayload(config, modelName, prompt, imageUrls, videoUrls, audioUrls);
+    const path = isGrok ? "/videos/generations" : "/contents/generations/tasks";
+
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, path), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const taskId = readVideoTaskId(created);
+        if (!taskId) throw new Error("duomiapi 接口没有返回任务 ID");
+        return { id: taskId, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "duomiapi 视频任务创建失败"));
     }
 }
 
@@ -211,6 +246,24 @@ async function pollNewTokenVideoTask(config: AiConfig, task: VideoGenerationTask
         return { status: "pending" };
     } catch (error) {
         throw new Error(readAxiosError(error, "NewToken 视频任务查询失败"));
+    }
+}
+
+async function pollDuomiVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    const isGrok = modelOptionName(task.model).toLowerCase().includes("grok");
+    const path = isGrok ? `/videos/tasks/${task.id}` : `/contents/generations/tasks/${task.id}`;
+    try {
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, path), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const status = normalizeTaskStatus(video.status || video.state || video.task_status);
+        if (status === "completed") {
+            const directUrl = readVideoUrl(video);
+            if (!directUrl) return { status: "failed", error: "duomiapi 任务成功但没有返回视频 URL" };
+            return { status: "completed", result: await videoResultFromUrl(directUrl, options) };
+        }
+        if (status === "failed") return { status: "failed", error: video.message || video.error?.message || "duomiapi 视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "duomiapi 视频任务查询失败"));
     }
 }
 
@@ -492,6 +545,43 @@ function normalizeNewTokenAspectRatio(value: string) {
     return ratio === "adaptive" ? "16:9" : ratio;
 }
 
+function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[]) {
+    const text = [
+        prompt,
+        imageUrls.length ? `参考图片：${imageUrls.map((_, index) => `图片${index + 1}`).join("、")}` : "",
+        videoUrls.length ? `参考视频：${videoUrls.map((_, index) => `视频${index + 1}`).join("、")}` : "",
+        audioUrls.length ? `参考音频：${audioUrls.map((_, index) => `音频${index + 1}`).join("、")}` : "",
+    ]
+        .filter(Boolean)
+        .join("\n");
+    return {
+        model,
+        content: [
+            { type: "text", text },
+            ...imageUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.images).map((url) => ({ type: "image_url", image_url: { url }, role: "reference_image" })),
+            ...videoUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.videos).map((url) => ({ type: "video_url", video_url: { url }, role: "reference_video" })),
+            ...audioUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.audios).map((url) => ({ type: "audio_url", audio_url: { url }, role: "reference_audio" })),
+        ],
+        generate_audio: boolConfig(config.videoGenerateAudio, true),
+        ratio: normalizeNewTokenAspectRatio(config.size),
+        duration: normalizeCaiDuration(config.videoSeconds),
+        resolution: normalizeSeedanceResolution(config.vquality, model).toLowerCase(),
+        watermark: boolConfig(config.videoWatermark, false),
+    };
+}
+
+function buildDuomiGrokPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[]) {
+    const duration = Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
+    return {
+        model,
+        prompt,
+        aspect_ratio: normalizeNewTokenAspectRatio(config.size),
+        duration,
+        quality: "720p",
+        image_urls: model === "grok-video-1.5" ? imageUrls.slice(0, 1) : imageUrls.slice(0, 7),
+    };
+}
+
 function unwrapVideoResponse(payload: ApiVideoResponse) {
     return unwrapEnvelope(payload, "接口没有返回视频任务");
 }
@@ -537,6 +627,7 @@ function readVideoUrl(payload: VideoResponse): string {
         payload.data?.image_url,
         payload.data?.output_url,
         payload.data?.content?.video_url,
+        payload.data?.videos?.[0]?.url,
         payload.data?.video?.url,
         payload.data?.output?.url,
         payload.data?.result?.url,

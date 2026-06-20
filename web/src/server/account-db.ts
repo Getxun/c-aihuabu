@@ -21,7 +21,7 @@ export type CloudChannel = {
     userId: string;
     name: string;
     baseUrl: string;
-    apiFormat: "openai" | "gemini" | "volcengine" | "openai-json";
+    apiFormat: "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken" | "duomiapi";
     models: string[];
     encryptedApiKey: string;
     createdAt: string;
