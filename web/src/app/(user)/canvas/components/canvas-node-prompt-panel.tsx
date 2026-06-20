@@ -260,20 +260,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <div className="relative max-w-[125px] min-w-[80px] flex-1">
-                                <ModelPicker
-                                    config={config}
-                                    value={config.model}
-                                    onChange={(model) => onConfigChange(node.id, { model })}
-                                    capability="video"
-                                    className="!h-10 w-full"
-                                    fullWidth
-                                    onMissingConfig={() => openConfigDialog(true)}
-                                />
-                                <span className="pointer-events-none absolute right-1.5 -top-2 scale-90 select-none rounded-full border border-black/20 bg-gradient-to-r from-amber-400 to-yellow-500 px-1 text-[9px] font-bold text-black shadow-sm">
-                                    PRO
-                                </span>
-                            </div>
+                            <ModelPicker
+                                config={config}
+                                value={config.model}
+                                onChange={(model) => onConfigChange(node.id, { model })}
+                                capability="video"
+                                className="!h-10 !max-w-[125px] flex-1"
+                                onMissingConfig={() => openConfigDialog(true)}
+                            />
                             <CanvasVideoSettingsPopover
                                 config={config}
                                 buttonClassName="!h-10 !max-w-[125px] !justify-start !rounded-full !px-3 flex-1 min-w-0 w-full"
