@@ -194,7 +194,7 @@ export function AgentChatComposer({
                     onChange={(event) => onPromptChange(event.target.value)}
                     onPaste={(event) => {
                         if (!onAddFiles) return;
-                        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+                        const images = getClipboardImageFiles(event.clipboardData);
                         if (!images.length) return;
                         event.preventDefault();
                         void onAddFiles(images);
@@ -228,6 +228,15 @@ export function AgentChatComposer({
             </div>
         </div>
     );
+}
+
+function getClipboardImageFiles(clipboardData: DataTransfer | null) {
+    const files = Array.from(clipboardData?.files || []).filter((item) => item.type.startsWith("image/"));
+    if (files.length) return files;
+    return Array.from(clipboardData?.items || [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
 }
 
 export function AgentModeSwitch({ value, theme, onChange }: { value: CanvasAgentMode; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (value: CanvasAgentMode) => void }) {

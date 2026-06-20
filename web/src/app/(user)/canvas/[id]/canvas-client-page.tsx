@@ -1335,7 +1335,7 @@ function InfiniteCanvasPage() {
 
     const pasteClipboardEventImage = useCallback(
         (clipboardData: DataTransfer | null) => {
-            const file = Array.from(clipboardData?.files || []).find((item) => item.type.startsWith("image/"));
+            const file = getClipboardImageFiles(clipboardData)[0];
             if (!file) return false;
             void createImageFileNode(file, getCanvasCenter());
             message.success("已从剪切板添加图片");
@@ -3141,6 +3141,15 @@ function Shortcut({ keys, value }: { keys: string[]; value: string }) {
 
 function imageExtension(dataUrl: string) {
     return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
+}
+
+function getClipboardImageFiles(clipboardData: DataTransfer | null) {
+    const files = Array.from(clipboardData?.files || []).filter((item) => item.type.startsWith("image/"));
+    if (files.length) return files;
+    return Array.from(clipboardData?.items || [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
 }
 
 function audioExtension(mimeType?: string) {
