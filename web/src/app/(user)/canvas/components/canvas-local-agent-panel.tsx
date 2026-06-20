@@ -17,10 +17,16 @@ const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
 const AGENT_CONNECT_STEPS = [
-    { title: "1. 本机已安装并登录 Codex", text: "先确认本机终端里的 Codex 可以正常使用。", command: "codex --version" },
-    { title: "2. 安装 C-ai Agent", text: "推荐全局安装，后续可以直接运行 c-ai-agent。", command: "npm i -g c-ai-agent" },
-    { title: "3. 启动 C-ai Agent", text: "启动后终端会输出 Local URL 和 Connect token。", command: "c-ai-agent" },
-    { title: "4. 回到网页连接", text: "把终端输出的地址和 token 填到下面，点击连接。" },
+    { title: "1. 安装 C-ai Agent", text: "推荐全局安装，后续可以直接运行 c-ai-agent。", command: "npm i -g c-ai-agent" },
+    { title: "2. 启动本地连接服务", text: "启动后终端会输出 Local URL 和 Connect token，用于网页侧边栏连接。", command: "c-ai-agent" },
+    { title: "3. 网页侧边栏对话", text: "把终端输出的地址和 token 填到下面，点击连接后，可以直接在网页里和本地 Agent 对话并操作当前画布。" },
+    { title: "4. Codex 快速接入", text: "如果你使用 Codex，可以把画布注册成 MCP 工具，之后在 Codex 里直接操作当前画布。", command: "codex mcp add infinite-canvas -- npx -y c-ai-agent mcp" },
+    { title: "5. 通用 MCP 接入", text: "爱马仕 Agent、OpenClaw、Claude Code 等支持 MCP 的客户端，都可以配置同一个画布工具。", command: `{"command":"npx","args":["-y","c-ai-agent","mcp"]}` },
+];
+const AGENT_COMPAT_ITEMS = [
+    "网页侧边栏：适合普通用户，填写 Local URL 和 token 后直接聊天操作画布。",
+    "Codex：适合开发者，执行上面的 codex mcp add 命令即可使用画布工具。",
+    "其他 MCP Agent：在对应客户端的 MCP 配置里添加 npx -y c-ai-agent mcp。",
 ];
 
 type AgentEventPayload = {
@@ -623,7 +629,21 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
                 <div>
                     <div className="text-base font-semibold leading-6">连接 C-ai Agent</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                        本地服务只监听 127.0.0.1，画布通过地址和 token 连接到你电脑上的 Codex。
+                        C-ai Agent 是运行在你电脑上的本地桥接服务，只监听 127.0.0.1。它把当前网页画布开放成通用 MCP 工具，可被 Codex、Claude Code、OpenClaw、爱马仕 Agent 等支持 MCP 的客户端调用。
+                    </div>
+                </div>
+                <div className="rounded-xl border p-3" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+                    <div className="text-sm font-medium leading-5">多 Agent 兼容</div>
+                    <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
+                        同一套画布工具可以同时服务网页侧边栏、Codex 和其他 MCP Agent。普通用户走网页连接；高级用户可在任意支持 stdio MCP 的 Agent 客户端里配置接入。
+                    </div>
+                    <div className="mt-2 grid gap-1.5">
+                        {AGENT_COMPAT_ITEMS.map((item) => (
+                            <div key={item} className="flex gap-2 text-xs leading-5" style={{ color: theme.node.muted }}>
+                                <span className="mt-2 size-1 shrink-0 rounded-full" style={{ background: theme.node.muted }} />
+                                <span>{item}</span>
+                            </div>
+                        ))}
                     </div>
                 </div>
                 <div className="space-y-2">

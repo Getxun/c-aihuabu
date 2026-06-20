@@ -30,6 +30,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [hasSelection, setHasSelection] = useState(false);
+    const [focused, setFocused] = useState(false);
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
@@ -85,7 +86,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         setHasSelection(Boolean(textarea && textarea.selectionStart !== textarea.selectionEnd));
     };
 
-    const showOverlay = Boolean(activeLabels.length && !hasSelection);
+    const showOverlay = Boolean(activeLabels.length && !hasSelection && !focused);
     const mergedStyle = {
         ...(style || {}),
         color: showOverlay ? "transparent" : style?.color,
@@ -123,6 +124,11 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 onSelect={(event) => {
                     updateSelectionState();
                     props.onSelect?.(event);
+                }}
+                onFocus={(event) => {
+                    setFocused(true);
+                    updateSelectionState();
+                    props.onFocus?.(event);
                 }}
                 onKeyUp={(event) => {
                     updateSelectionState();
@@ -162,6 +168,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     props.onScroll?.(event);
                 }}
                 onBlur={(event) => {
+                    setFocused(false);
                     setHasSelection(false);
                     window.setTimeout(closeMention, 120);
                     props.onBlur?.(event);
@@ -194,13 +201,17 @@ function MentionHighlightText({ value, labels, placeholder }: { value: string; l
 function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { textarea: HTMLTextAreaElement; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void }) {
     const selectedRef = useRef(false);
     const rect = textarea.getBoundingClientRect();
+    const caretRect = getTextareaCaretRect(textarea);
     const boundary = textarea.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
     const menuWidth = 256;
     const maxMenuHeight = 224;
     const gap = 6;
-    const left = clamp(rect.left, boundary.left + 8, boundary.right - menuWidth - 8);
-    const showAbove = rect.bottom + gap + maxMenuHeight > boundary.bottom && rect.top - gap - maxMenuHeight >= boundary.top;
-    const top = clamp(showAbove ? rect.top - gap - maxMenuHeight : rect.bottom + gap, boundary.top + 8, boundary.bottom - maxMenuHeight - 8);
+    const anchorLeft = caretRect?.left ?? rect.left;
+    const anchorTop = caretRect?.top ?? rect.top;
+    const anchorBottom = caretRect?.bottom ?? rect.bottom;
+    const left = clamp(anchorLeft, boundary.left + 8, boundary.right - menuWidth - 8);
+    const showAbove = anchorBottom + gap + maxMenuHeight > boundary.bottom && anchorTop - gap - maxMenuHeight >= boundary.top;
+    const top = clamp(showAbove ? anchorTop - gap - maxMenuHeight : anchorBottom + gap, boundary.top + 8, boundary.bottom - maxMenuHeight - 8);
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => {
         event.stopPropagation();
@@ -247,6 +258,59 @@ function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { t
         </div>,
         document.body,
     );
+}
+
+function getTextareaCaretRect(textarea: HTMLTextAreaElement) {
+    const style = window.getComputedStyle(textarea);
+    const mirror = document.createElement("div");
+    const marker = document.createElement("span");
+    const properties = [
+        "boxSizing",
+        "width",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "fontFamily",
+        "fontSize",
+        "fontWeight",
+        "fontStyle",
+        "letterSpacing",
+        "lineHeight",
+        "textTransform",
+        "textAlign",
+        "textIndent",
+        "tabSize",
+    ] as const;
+    properties.forEach((name) => {
+        mirror.style[name] = style[name];
+    });
+    mirror.style.position = "fixed";
+    mirror.style.left = "-9999px";
+    mirror.style.top = "0";
+    mirror.style.height = "auto";
+    mirror.style.minHeight = "0";
+    mirror.style.maxHeight = "none";
+    mirror.style.overflow = "hidden";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "break-word";
+    mirror.style.visibility = "hidden";
+    mirror.textContent = textarea.value.slice(0, textarea.selectionStart);
+    marker.textContent = "\u200b";
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    const textareaRect = textarea.getBoundingClientRect();
+    const markerRect = marker.getBoundingClientRect();
+    const mirrorRect = mirror.getBoundingClientRect();
+    const left = textareaRect.left + markerRect.left - mirrorRect.left - textarea.scrollLeft;
+    const top = textareaRect.top + markerRect.top - mirrorRect.top - textarea.scrollTop;
+    const lineHeight = Number.parseFloat(style.lineHeight) || 20;
+    mirror.remove();
+    return { left, top, bottom: top + lineHeight };
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
