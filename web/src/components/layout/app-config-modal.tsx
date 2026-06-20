@@ -426,7 +426,6 @@ export function AppConfigModal() {
                                                 </Form.Item>
                                                 <Form.Item label="调用格式" className="mb-0">
                                                     <Select value={channel.apiFormat} options={apiFormatOptions} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
-                                                    {channel.apiFormat === "newtoken" ? <div className="mt-1 text-xs leading-5 text-stone-500">按 NewToken 文档使用 JSON 异步协议：创建 <code>POST /v1/videos</code>，查询 <code>GET /v1/videos/{"{task_id}"}</code>，参考素材会按模型自动映射到 <code>image_url</code>、<code>extra_images</code>、<code>Ingredients_images</code> 等字段。</div> : null}
                                                 </Form.Item>
                                                 <Form.Item label="Base URL" className="mb-0">
                                                     <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
