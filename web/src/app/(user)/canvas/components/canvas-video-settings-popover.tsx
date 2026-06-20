@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Settings2 } from "lucide-react";
+import { Settings2, Volume2 } from "lucide-react";
 import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
@@ -51,8 +51,9 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
         <>
             <span ref={buttonRef} className={`inline-flex min-w-0 ${buttonClassName?.includes("w-full") ? "w-full" : ""} ${buttonClassName?.includes("flex-1") ? "flex-1" : ""}`}>
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
-                    <span className="truncate">
+                    <span className="truncate flex items-center gap-1">
                         {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)}
+                        {config.videoGenerateAudio === "true" && <Volume2 className="size-3 shrink-0 ml-1 opacity-70" />}
                     </span>
                 </Button>
             </span>

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, DownloadCloud, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, DownloadCloud, Film, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -333,7 +333,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[540px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
     );
 });
@@ -341,6 +341,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
+    if (props.node.metadata?.status === "loading" && props.node.type === CanvasNodeType.Video) return <VideoTaskContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onPullVideoTask={props.onPullVideoTask} />;
 
@@ -369,6 +370,11 @@ function ErrorContent({ node, theme, onRetry, onPullVideoTask }: Pick<NodeConten
     const canPullVideoTask = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
+            {node.type === CanvasNodeType.Video && node.metadata?.videoTaskId ? (
+                <div className="max-w-full truncate rounded-full border px-2.5 py-1 text-[10px]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.muted }}>
+                    任务 ID：{node.metadata.videoTaskId}
+                </div>
+            ) : null}
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
             <div className="flex flex-wrap justify-center gap-2">
                 {canPullVideoTask ? (
@@ -402,6 +408,61 @@ function ErrorContent({ node, theme, onRetry, onPullVideoTask }: Pick<NodeConten
             </div>
         </div>
     );
+}
+
+function VideoTaskContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const references = node.metadata?.references?.length || 0;
+    const specs = [
+        node.metadata?.videoMode ? videoModeLabel(node.metadata.videoMode) : "",
+        node.metadata?.seconds ? `${node.metadata.seconds}秒` : "",
+        node.metadata?.size,
+        node.metadata?.vquality,
+        node.metadata?.cameraMovement && node.metadata.cameraMovement !== "自适应" ? `运镜 ${node.metadata.cameraMovement}` : "",
+    ].filter(Boolean);
+
+    return (
+        <div className="relative flex h-full w-full flex-col justify-between overflow-hidden rounded-[inherit] p-5" style={{ background: `linear-gradient(135deg, ${theme.node.fill}, ${theme.toolbar.panel})`, color: theme.node.text }}>
+            <div className="pointer-events-none absolute -right-10 -top-14 size-36 rounded-full opacity-25 blur-2xl" style={{ background: theme.node.activeStroke }} />
+            <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className="grid size-11 shrink-0 place-items-center rounded-2xl" style={{ background: theme.toolbar.activeBg, color: theme.node.activeStroke }}>
+                        <Film className="size-5" />
+                    </div>
+                    <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">视频任务生成中</div>
+                        <div className="mt-1 truncate text-[11px]" style={{ color: theme.node.muted }}>
+                            {node.metadata?.model || "未选择模型"}
+                        </div>
+                    </div>
+                </div>
+                <div className="size-7 shrink-0 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
+            </div>
+            <div className="space-y-2">
+                {node.metadata?.videoTaskId ? <VideoTaskRow label="任务" value={node.metadata.videoTaskId} theme={theme} /> : null}
+                {references ? <VideoTaskRow label="参考" value={`${references} 个素材`} theme={theme} /> : null}
+                {specs.length ? <VideoTaskRow label="参数" value={specs.join(" · ")} theme={theme} /> : null}
+            </div>
+        </div>
+    );
+}
+
+function VideoTaskRow({ label, value, theme }: { label: string; value: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    return (
+        <div className="flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ background: `${theme.toolbar.panel}aa`, borderColor: theme.toolbar.border }}>
+            <span className="shrink-0 opacity-50">{label}</span>
+            <span className="truncate font-medium" style={{ color: theme.node.text }}>
+                {value}
+            </span>
+        </div>
+    );
+}
+
+function videoModeLabel(value: string) {
+    if (value === "all-around") return "全能参考";
+    if (value === "image-to-video") return "图生视频";
+    if (value === "first-last") return "首尾帧";
+    if (value === "image-ref") return "图片参考";
+    return "文生视频";
 }
 
 function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
@@ -536,6 +597,24 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
             <div className="absolute inset-x-10 top-2 z-30 h-7 cursor-move rounded-full border text-center text-[10px] font-medium leading-7 opacity-70 backdrop-blur transition hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-drag-handle>
                 拖动视频
             </div>
+            <VideoInfoOverlay node={node} theme={theme} />
+        </div>
+    );
+}
+
+function VideoInfoOverlay({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const references = node.metadata?.references?.length || 0;
+    const primary = [node.metadata?.model, node.metadata?.videoMode ? videoModeLabel(node.metadata.videoMode) : "", node.metadata?.seconds ? `${node.metadata.seconds}秒` : ""].filter(Boolean).join(" · ");
+    const secondary = [references ? `${references} 参考` : "", node.metadata?.cameraMovement && node.metadata.cameraMovement !== "自适应" ? `运镜 ${node.metadata.cameraMovement}` : "", node.metadata?.videoTaskId ? `ID ${node.metadata.videoTaskId}` : ""].filter(Boolean).join(" · ");
+    if (!primary && !secondary) return null;
+    return (
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 rounded-2xl border px-3 py-2 backdrop-blur-md" style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}>
+            {primary ? <div className="truncate text-[11px] font-semibold">{primary}</div> : null}
+            {secondary ? (
+                <div className="mt-0.5 truncate text-[10px]" style={{ color: theme.node.muted }}>
+                    {secondary}
+                </div>
+            ) : null}
         </div>
     );
 }

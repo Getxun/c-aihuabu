@@ -310,6 +310,7 @@ function InfiniteCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+    const [preLayoutNodes, setPreLayoutNodes] = useState<CanvasNodeData[] | null>(null);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -1015,6 +1016,224 @@ function InfiniteCanvasPage() {
         applyHistory(next);
     }, [applyHistory]);
 
+    const tidyUpCanvas = useCallback(() => {
+        if (nodes.length === 0) return;
+
+        // Backup current layout positions
+        setPreLayoutNodes([...nodes]);
+
+        // Construct graph mapping
+        const adj: Record<string, string[]> = {};
+        const inDegree: Record<string, number> = {};
+        const allNodeIds = new Set(nodes.map((n) => n.id));
+
+        nodes.forEach((n) => {
+            adj[n.id] = [];
+            inDegree[n.id] = 0;
+        });
+
+        connections.forEach((conn) => {
+            if (allNodeIds.has(conn.fromNodeId) && allNodeIds.has(conn.toNodeId)) {
+                adj[conn.fromNodeId].push(conn.toNodeId);
+                inDegree[conn.toNodeId] = (inDegree[conn.toNodeId] || 0) + 1;
+            }
+        });
+
+        // Determine all nodes involved in lines
+        const connectedNodeIds = new Set<string>();
+        connections.forEach((conn) => {
+            if (allNodeIds.has(conn.fromNodeId) && allNodeIds.has(conn.toNodeId)) {
+                connectedNodeIds.add(conn.fromNodeId);
+                connectedNodeIds.add(conn.toNodeId);
+            }
+        });
+
+        const connectedNodes = nodes.filter((n) => connectedNodeIds.has(n.id));
+        const isolatedNodes = nodes.filter((n) => !connectedNodeIds.has(n.id));
+
+        const rank: Record<string, number> = {};
+        const queue: string[] = [];
+
+        // Roots for BFS ranking (connected nodes with no incoming lines)
+        connectedNodes.forEach((n) => {
+            if ((inDegree[n.id] || 0) === 0) {
+                rank[n.id] = 0;
+                queue.push(n.id);
+            }
+        });
+
+        // Fallback for circular connections/subgraphs - force first connected node as root
+        if (queue.length === 0 && connectedNodes.length > 0) {
+            const firstId = connectedNodes[0].id;
+            rank[firstId] = 0;
+            queue.push(firstId);
+        }
+
+        // BFS traversal topological layering
+        let maxRank = 0;
+        while (queue.length > 0) {
+            const u = queue.shift()!;
+            const r = rank[u] || 0;
+            if (r > maxRank) maxRank = r;
+
+            adj[u].forEach((v) => {
+                const nextRank = r + 1;
+                if (rank[v] === undefined || nextRank > rank[v]) {
+                    rank[v] = nextRank;
+                    queue.push(v);
+                }
+            });
+        }
+
+        // Ensure all connected nodes receive a rank index
+        connectedNodes.forEach((n) => {
+            if (rank[n.id] === undefined) {
+                rank[n.id] = maxRank + 1;
+            }
+        });
+
+        const layoutedNodes = [...nodes];
+        const startX = 100;
+        const startY = 150;
+        const colPaddingX = 100;
+        const rowPaddingY = 60;
+
+        // Helper to get node dimensions with fallbacks
+        const getNodeSize = (node: CanvasNodeData) => {
+            const defaultSpec = NODE_DEFAULT_SIZE[node.type] || { width: 340, height: 240 };
+            return {
+                width: node.width || defaultSpec.width,
+                height: node.height || defaultSpec.height,
+            };
+        };
+
+        // Group connected nodes by rank columns
+        const rankGroups: Record<number, string[]> = {};
+        Object.entries(rank).forEach(([nodeId, r]) => {
+            if (!rankGroups[r]) rankGroups[r] = [];
+            rankGroups[r].push(nodeId);
+        });
+
+        const rankKeys = Object.keys(rankGroups).map(Number).sort((a, b) => a - b);
+
+        const sortedRankGroups: Record<number, CanvasNodeData[]> = {};
+        rankKeys.forEach((r) => {
+            const nodeIds = rankGroups[r];
+            const rankNodes = nodes.filter((n) => nodeIds.includes(n.id));
+            rankNodes.sort((a, b) => a.position.y - b.position.y);
+            sortedRankGroups[r] = rankNodes;
+        });
+
+        const columnWidths: Record<number, number> = {};
+        const columnHeights: Record<number, number> = {};
+        const columnNodeTempY: Record<number, number[]> = {};
+
+        rankKeys.forEach((r) => {
+            const rankNodes = sortedRankGroups[r] || [];
+            let maxWidth = 0;
+            let currentTempY = 0;
+            const tempYList: number[] = [];
+
+            rankNodes.forEach((node, idx) => {
+                const { width, height } = getNodeSize(node);
+                if (width > maxWidth) {
+                    maxWidth = width;
+                }
+                tempYList.push(currentTempY);
+                currentTempY += height;
+                if (idx < rankNodes.length - 1) {
+                    currentTempY += rowPaddingY;
+                }
+            });
+
+            columnWidths[r] = maxWidth;
+            columnHeights[r] = currentTempY;
+            columnNodeTempY[r] = tempYList;
+        });
+
+        const maxColumnHeight = rankKeys.length > 0 ? Math.max(...Object.values(columnHeights)) : 0;
+
+        const columnX: Record<number, number> = {};
+        let currentColumnX = startX;
+        rankKeys.forEach((r) => {
+            columnX[r] = currentColumnX;
+            currentColumnX += (columnWidths[r] || 0) + colPaddingX;
+        });
+
+        let maxConnectedRight = startX;
+        rankKeys.forEach((r) => {
+            const rightEdge = columnX[r] + (columnWidths[r] || 0);
+            if (rightEdge > maxConnectedRight) {
+                maxConnectedRight = rightEdge;
+            }
+        });
+
+        // Layout connected rank columns with vertical centering
+        rankKeys.forEach((r) => {
+            const rankNodes = sortedRankGroups[r] || [];
+            const colX = columnX[r];
+            const colHeight = columnHeights[r];
+            const tempYList = columnNodeTempY[r] || [];
+
+            rankNodes.forEach((node, idx) => {
+                const nodeIdx = layoutedNodes.findIndex((n) => n.id === node.id);
+                if (nodeIdx >= 0) {
+                    const centerYOffset = (maxColumnHeight - colHeight) / 2;
+                    layoutedNodes[nodeIdx] = {
+                        ...layoutedNodes[nodeIdx],
+                        position: {
+                            x: colX,
+                            y: startY + centerYOffset + tempYList[idx],
+                        },
+                    };
+                }
+            });
+        });
+
+        // Layout unconnected (isolated) nodes on the right/bottom in a grid
+        const isolatedStartX = connectedNodes.length > 0 ? maxConnectedRight + colPaddingX : startX;
+        const isolatedNodesSize = isolatedNodes.map((n) => getNodeSize(n));
+        const maxIsolatedWidth = isolatedNodesSize.length > 0 ? Math.max(...isolatedNodesSize.map((s) => s.width)) : 340;
+        const maxIsolatedHeight = isolatedNodesSize.length > 0 ? Math.max(...isolatedNodesSize.map((s) => s.height)) : 240;
+
+        const cols = 3;
+        const gridColW = maxIsolatedWidth + colPaddingX;
+        const gridRowH = maxIsolatedHeight + rowPaddingY;
+
+        const sortedIsolated = [...isolatedNodes].sort((a, b) => a.position.y - b.position.y);
+
+        sortedIsolated.forEach((n, index) => {
+            const nodeIdx = layoutedNodes.findIndex((item) => item.id === n.id);
+            if (nodeIdx >= 0) {
+                const col = index % cols;
+                const row = Math.floor(index / cols);
+                layoutedNodes[nodeIdx] = {
+                    ...layoutedNodes[nodeIdx],
+                    position: {
+                        x: isolatedStartX + col * gridColW,
+                        y: startY + row * gridRowH,
+                    },
+                };
+            }
+        });
+
+        setNodes(layoutedNodes);
+        message.success("画布已自动整理");
+    }, [nodes, connections]);
+
+    const undoTidyUp = useCallback(() => {
+        if (preLayoutNodes) {
+            setNodes(preLayoutNodes);
+            setPreLayoutNodes(null);
+            message.info("已还原画布位置");
+        }
+    }, [preLayoutNodes]);
+
+    const confirmTidyUp = useCallback(() => {
+        setPreLayoutNodes(null);
+        message.success("已保留整理结果");
+    }, []);
+
     const createAndOpenProject = useCallback(() => {
         const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);
         router.push(`/canvas/${id}`);
@@ -1116,6 +1335,7 @@ function InfiniteCanvasPage() {
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
+            setPreLayoutNodes(null);
             setNodes((prev) =>
                 prev.map((node) => {
                     const initial = initialPositions.find((item) => item.id === node.id);
@@ -1538,6 +1758,10 @@ function InfiniteCanvasPage() {
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+    }, []);
+
+    const handleRemoveReference = useCallback((refNodeId: string, targetNodeId: string) => {
+        setConnections((prev) => prev.filter((c) => !(c.fromNodeId === refNodeId && c.toNodeId === targetNodeId)));
     }, []);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
@@ -2248,7 +2472,7 @@ function InfiniteCanvasPage() {
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) },
+                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: node.metadata?.videoMode, cameraMovement: node.metadata?.cameraMovement, references: generationReferenceUrls(generationContext) },
                     };
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
@@ -2262,7 +2486,7 @@ function InfiniteCanvasPage() {
                         if (state.status === "pending") throw new Error(VIDEO_TASK_PENDING_MESSAGE);
                         const video = await storeGeneratedVideo(state.result);
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext), ...videoTaskMetadata(task) } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: node.metadata?.videoMode, cameraMovement: node.metadata?.cameraMovement, references: generationReferenceUrls(generationContext), ...videoTaskMetadata(task) } } : node)));
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -2427,7 +2651,7 @@ function InfiniteCanvasPage() {
                     if (state.status === "pending") throw new Error(VIDEO_TASK_PENDING_MESSAGE);
                     const video = await storeGeneratedVideo(state.result);
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, ...videoTaskMetadata(task) } } : item)));
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: node.metadata?.videoMode, cameraMovement: node.metadata?.cameraMovement, ...videoTaskMetadata(task) } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
@@ -2739,6 +2963,7 @@ function InfiniteCanvasPage() {
                                         onConfigChange={handleConfigNodeChange}
                                         onGenerate={handleGenerateNode}
                                         onStop={confirmStopGeneration}
+                                        onRemoveReference={(refNodeId) => handleRemoveReference(refNodeId, panelNode.id)}
                                         onImageSettingsOpenChange={(open) => {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);
@@ -2859,7 +3084,18 @@ function InfiniteCanvasPage() {
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 
-                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
+                <CanvasZoomControls
+                    scale={viewport.k}
+                    onScaleChange={setZoomScale}
+                    onReset={resetViewport}
+                    isMiniMapOpen={isMiniMapOpen}
+                    onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)}
+                    onOpenAssets={() => setAssetPickerOpen(true)}
+                    onTidyUp={tidyUpCanvas}
+                    onConfirmTidyUp={confirmTidyUp}
+                    onUndoTidyUp={undoTidyUp}
+                    hasTidyUpBackup={preLayoutNodes !== null}
+                />
 
                 {contextMenu ? (
                     <CanvasNodeContextMenu

@@ -47,6 +47,13 @@ export function ConnectionPath({
                     onContextMenu?.(event);
                 }}
             />
+            <style>{`
+                @keyframes connection-flow-dash {
+                    to {
+                        stroke-dashoffset: -100;
+                    }
+                }
+            `}</style>
             <path
                 d={pathD}
                 stroke={active ? theme.node.activeStroke : theme.node.muted}
@@ -54,6 +61,19 @@ export function ConnectionPath({
                 strokeOpacity={active ? 1 : 0.82}
                 fill="none"
                 style={{ filter: active ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
+            />
+            <path
+                d={pathD}
+                stroke={active ? theme.node.activeStroke : `${theme.node.activeStroke}80`}
+                strokeWidth={active ? 2.5 : 1.5}
+                strokeLinecap="round"
+                fill="none"
+                style={{
+                    pointerEvents: "none",
+                    strokeDasharray: "20, 80",
+                    animation: "connection-flow-dash 2s linear infinite",
+                    filter: `drop-shadow(0 0 4px ${theme.node.activeStroke}88)`,
+                }}
             />
         </g>
     );
