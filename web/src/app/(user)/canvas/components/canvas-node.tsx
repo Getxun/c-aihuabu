@@ -116,6 +116,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
+    const panelScale = Math.min(1.85, Math.max(1, 0.82 / Math.max(scale, 0.1)));
+    const panelWidth = data.type === CanvasNodeType.Video ? "min(680px,calc(100vw-32px))" : "min(540px,calc(100vw-32px))";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -333,7 +335,18 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className={`absolute left-1/2 top-full z-[70] -translate-x-1/2 pt-4 ${data.type === CanvasNodeType.Video ? "w-[min(680px,calc(100vw-32px))]" : "w-[min(540px,calc(100vw-32px))]"}`}>{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? (
+                <div
+                    className="absolute left-1/2 top-full z-[70] pt-4"
+                    style={{
+                        width: panelWidth,
+                        transform: `translateX(-50%) scale(${panelScale})`,
+                        transformOrigin: "top center",
+                    }}
+                >
+                    {renderPanel(data)}
+                </div>
+            ) : null}
         </div>
     );
 });

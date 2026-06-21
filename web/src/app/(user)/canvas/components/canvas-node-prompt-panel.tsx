@@ -265,7 +265,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     references={mentionReferences}
                     onChange={updatePrompt}
                     onSubmit={submit}
-                    className={`thin-scrollbar w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 outline-none focus:ring-0 ${mode === "video" ? "h-24 min-h-24" : "h-20"}`}
+                    className={`thin-scrollbar w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 outline-none focus:ring-0 ${mode === "video" ? "min-h-28 max-h-44" : "h-20"}`}
                     style={{ color: theme.node.text }}
                     placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent, mentionReferences.length > 0)}
                 />
