@@ -2498,6 +2498,8 @@ function InfiniteCanvasPage() {
                     const videoReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceVideos : [];
                     const audioReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceAudios : [];
                     const videoReferenceContext = { ...generationContext, referenceVideos: videoReferences, referenceAudios: audioReferences };
+                    const videoMode = sourceNode?.metadata?.videoMode;
+                    const cameraMovement = sourceNode?.metadata?.cameraMovement;
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
@@ -2509,21 +2511,21 @@ function InfiniteCanvasPage() {
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: node.metadata?.videoMode, cameraMovement: node.metadata?.cameraMovement, references: generationReferenceUrls(videoReferenceContext) },
+                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode, cameraMovement, references: generationReferenceUrls(videoReferenceContext) },
                     };
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
-                        const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, videoReferences, audioReferences, { signal: controller.signal, videoMode: node.metadata?.videoMode });
+                        const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, videoReferences, audioReferences, { signal: controller.signal, videoMode });
                         setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, metadata: { ...node.metadata, ...videoTaskMetadata(task) } } : node)));
                         const state = await waitCanvasVideoTask(generationConfig, task, { signal: controller.signal });
                         if (state.status === "failed") throw new Error(state.error);
                         if (state.status === "pending") throw new Error(VIDEO_TASK_PENDING_MESSAGE);
                         const video = await storeGeneratedVideo(state.result);
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: node.metadata?.videoMode, cameraMovement: node.metadata?.cameraMovement, references: generationReferenceUrls(videoReferenceContext), ...videoTaskMetadata(task) } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode, cameraMovement, references: generationReferenceUrls(videoReferenceContext), ...videoTaskMetadata(task) } } : node)));
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
