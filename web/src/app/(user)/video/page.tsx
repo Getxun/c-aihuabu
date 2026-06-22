@@ -86,7 +86,7 @@ export default function VideoPage() {
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
-    const [running, setRunning] = useState(false);
+    const [runningCount, setRunningCount] = useState(0);
     const [logsOpen, setLogsOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -99,6 +99,7 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const running = runningCount > 0;
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -301,7 +302,7 @@ export default function VideoPage() {
     const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig) => {
         if (!log.task || activeLogIdsRef.current.has(log.id)) return;
         activeLogIdsRef.current.add(log.id);
-        setRunning(true);
+        setRunningCount((value) => value + 1);
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
@@ -362,8 +363,8 @@ export default function VideoPage() {
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
+            setRunningCount((value) => Math.max(0, value - 1));
             if (!activeLogIdsRef.current.size) {
-                setRunning(false);
                 setStartedAt(0);
             }
         }
@@ -513,8 +514,8 @@ export default function VideoPage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
+                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={() => void generate()}>
+                                {running ? "继续提交新任务" : "开始生成"}
                             </Button>
                         </div>
                     </div>

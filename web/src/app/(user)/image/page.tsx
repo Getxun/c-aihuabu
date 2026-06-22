@@ -80,7 +80,7 @@ export default function ImagePage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
-    const [running, setRunning] = useState(false);
+    const [runningCount, setRunningCount] = useState(0);
     const [logsOpen, setLogsOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -93,6 +93,7 @@ export default function ImagePage() {
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const running = runningCount > 0;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
     useEffect(() => {
@@ -153,7 +154,7 @@ export default function ImagePage() {
         if (!snapshot) return;
 
         setElapsedMs(0);
-        setRunning(true);
+        setRunningCount((value) => value + 1);
         setPreviewLog(null);
         setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
         const batchStartedAt = performance.now();
@@ -214,7 +215,7 @@ export default function ImagePage() {
             await updatePendingLog(successCount ? "成功" : "失败", failed?.reason instanceof Error ? failed.reason.message : undefined);
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
-            setRunning(false);
+            setRunningCount((value) => Math.max(0, value - 1));
         }
     };
 
@@ -435,8 +436,8 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
+                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={() => void generate()}>
+                                {running ? "继续提交新任务" : "开始生成"}
                             </Button>
                         </div>
                     </div>
