@@ -691,16 +691,39 @@ async function uploadCaiReferenceFile(file: File, options?: RequestOptions) {
 
 async function assertUploadedReferenceReachable(url: string, mimeType: string, options?: RequestOptions) {
     try {
-        const response = await axios.head(url, { signal: options?.signal });
+        const response = await axios.head(url, { signal: options?.signal }).catch(async (error) => {
+            if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+            await probeUploadedReference(url, mimeType, options);
+            return null;
+        });
+        if (!response) return;
         const contentType = String(response.headers["content-type"] || "").toLowerCase();
         const contentLength = Number(response.headers["content-length"] || 0);
         if (mimeType.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType || "empty"}`);
-        if (contentLength <= 0) throw new Error("Content-Length 为空");
+        if (contentLength <= 0) await probeUploadedReference(url, mimeType, options);
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         const reason = error instanceof Error ? error.message : "无法访问";
         throw new Error(`参考素材公网地址自检失败：${reason}。请确认 ${url} 可在公网无登录访问，且反向代理没有拦截 HEAD/图片读取。`);
     }
+}
+
+async function probeUploadedReference(url: string, mimeType: string, options?: RequestOptions) {
+    const response = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        signal: options?.signal,
+        cache: "no-store",
+    });
+    if (!response.ok && response.status !== 206) throw new Error(`GET=${response.status}`);
+    const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+    if (mimeType.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType || "empty"}`);
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    const result = await reader.read();
+    await reader.cancel().catch(() => undefined);
+    if (!result.done && result.value?.byteLength) return;
+    throw new Error("GET 内容为空");
 }
 
 function isCaiReachableUrl(value: string) {
