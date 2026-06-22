@@ -10,7 +10,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 对应提交范围：`d6b430f` 起到当前最新提交，重点覆盖脚本生成器、参考图片托管和视频提交链路。
 - 画布脚本生成器：新建“脚本生成器”节点，测试三种模式“主题分镜 / 参考图文案 / 图文转视频”；点击节点内“上传参考图”后，应自动创建图片节点并连线到脚本生成器；只上传图片不输入文字时，也应能生成文案分析摘要和分镜卡片；点击“拆分镜头”后，应生成“镜头文本 -> 图片节点 -> 视频节点”的工作流。
 - 视频参考图片提交：从画布图片节点连接到视频节点后提交，浏览器应先调用 `/api/uploads/references` 上传参考图片，再把返回的本服务公网 HTTPS URL 提交给 Cai / NewToken / duomiapi；不应再直传原始外部图片 URL、`blob:` 或 dataURL。
-- 参考素材公网读取：部署环境必须配置 `C_AI_PUBLIC_BASE_URL=https://你的域名`，并确认 `curl -I https://你的域名/api/uploads/references/文件名` 返回 `200`、正确 `Content-Type` 和非空 `Content-Length`。
+- 参考素材公网读取：部署环境必须配置 `C_AI_PUBLIC_BASE_URL=https://你的域名`，并确认 `curl -I https://你的域名/api/uploads/references/文件名` 返回 `200` 和正确 `Content-Type`；如果反向代理没有返回 `Content-Length` 或拦截 `HEAD`，前端会改用 `GET Range` 探测兜底，但公网 HTTPS 链路仍必须能稳定读取图片内容。
 - 生图/视频工作台并发提交：生图工作台和视频创作台在已有任务生成中时，提交按钮不再锁死，可继续提交新的生成任务；历史记录应保留每次提交，视频任务会继续后台轮询多个任务。
 
 - 配置与用户偏好：每个模型渠道新增 OpenAI / Gemini 调用格式选择，默认 OpenAI，切换默认格式时同步更新默认 Base URL；渠道 Tab 增加紧凑醒目的提醒，说明模型是否可选需要到“模型”Tab 选择。
@@ -45,7 +45,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - **画布生成后保留提示词修复**：统一输入框生成出图片、文本、视频或音频结果后，会继续保留原来的文案提示词；继续编辑输入框时也会同步写回节点，避免面板重渲染后丢失。
 - **视频参考图片本地上传**：Cai 专用视频接口创建任务前，会把画布本地参考图片上传到服务端本地目录并生成公网访问 URL 后再提交给上游，避免 `blob:` / dataURL 这类浏览器本地素材无法被上游异步任务读取；上传目录超过 2GB 时会自动清理最旧图片，Docker 部署默认挂载 `./data/uploads` 保留临时素材。
 - **视频参考媒体本地上传**：Cai / NewToken / duomiapi 视频接口创建任务前，本地参考视频和参考音频也会先上传到服务端临时素材目录，再把公网 HTTPS 地址提交给上游；如果部署环境未配置 `C_AI_PUBLIC_BASE_URL` 或返回地址不是公网 HTTPS，会在前端直接提示配置问题，避免继续提交不可访问素材导致上游 408。
-- **视频参考素材公网读取增强**：参考素材临时上传接口补充 `HEAD`、`Content-Length`、`Accept-Ranges`、`Content-Disposition` 和 `nosniff` 响应头；Cai/NewToken/duomiapi 提交参考图时不再直传原始外部 URL，而是统一重新上传到本服务临时存储，再把本服务公网 HTTPS 地址提交给上游，并在提交前做可访问性自检，提前发现反向代理拦截、域名配置错误或图片响应头异常，减少上游 `invalid image_url` / `read image url failed`。
+- **视频参考素材公网读取增强**：参考素材临时上传接口补充 `HEAD`、`Content-Length`、`Accept-Ranges`、`Content-Disposition` 和 `nosniff` 响应头；Cai/NewToken/duomiapi 提交参考图时不再直传原始外部 URL，而是统一重新上传到本服务临时存储，再把本服务公网 HTTPS 地址提交给上游，并在提交前做可访问性自检；当反向代理未返回 `Content-Length` 或拦截 `HEAD` 时，会改用 `GET Range` 探测兜底，提前发现域名配置错误或图片读取异常，减少上游 `invalid image_url` / `read image url failed`。
 - **772 视频渠道自动兼容 Cai**：当视频渠道 Base URL 使用 `ai.772.ee` / `api.772.ee` / `*.772.ee` 时，即使渠道调用格式未手动切到“Cai 专用接口”，也会自动使用 Cai JSON 视频任务创建逻辑并上传本地参考图片，避免误走 OpenAI multipart 文件直传导致 500。
 - **NewToken 异步视频接口适配**：渠道调用格式新增 `NewToken 异步接口`，配置页支持一键填入常用视频模型；视频生成会按 `POST /v1/videos` / `GET /v1/videos/{task_id}` 协议创建和轮询任务，并按模型族适配 `video-standard-720p`、`video-pro-720p`、`video-fast-720p`、`sora-2`、`sora-vip3-pro-*`、`veo-omni-flash`、`veo-omni-flash-video-edit`、`veo-3-1` 的参考图/视频/音频字段。
 - **NewToken gpt-image2 异步生图适配**：NewToken 调用格式下，`gpt-image2-1k` / `gpt-image2-2k` / `gpt-image2-4k` 会按官方文档改走 `POST /v1/videos` 创建异步图片任务，并轮询 `GET /v1/videos/{task_id}` 读取 `image_url` / `url` / `metadata.result_urls` 结果；只有 `gpt-image2-*_sync` 模型继续走同步 `/v1/images/generations`。
