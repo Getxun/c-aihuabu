@@ -16,7 +16,8 @@ import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta, sanitizeImageDataUrl } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
-import { isSeedanceVideoModel } from "@/lib/seedance-video";
+import { boolConfig, isSeedanceVideoModel, normalizeSeedanceRatio, seedanceVideoReferenceError, seedanceVideoReferenceHint } from "@/lib/seedance-video";
+import { normalizeVideoResolutionValue, normalizeVideoSizeValue } from "@/components/video-settings-panel";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -2319,7 +2320,8 @@ function InfiniteCanvasPage() {
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
-            if (!effectivePrompt && (mode === "text" || mode === "audio")) {
+            if (!effectivePrompt && (mode === "text" || mode === "audio" || mode === "video")) {
+                if (mode === "video") message.error("请输入视频提示词");
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
                 return;
@@ -2497,6 +2499,11 @@ function InfiniteCanvasPage() {
                 if (mode === "video") {
                     const videoReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceVideos : [];
                     const audioReferences = supportsRichVideoReferences(generationConfig) ? generationContext.referenceAudios : [];
+                    const videoReferenceError = seedanceVideoReferenceError(videoReferences);
+                    if (videoReferenceError) {
+                        message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
+                        return;
+                    }
                     const videoReferenceContext = { ...generationContext, referenceVideos: videoReferences, referenceAudios: audioReferences };
                     const videoMode = sourceNode?.metadata?.videoMode;
                     const cameraMovement = sourceNode?.metadata?.cameraMovement;
@@ -3611,7 +3618,7 @@ function getInputSummary(inputs: NodeGenerationInput[]) {
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
-    return {
+    const nextConfig = {
         ...config,
         model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
@@ -3626,6 +3633,24 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
+    if (mode !== "video") return nextConfig;
+    const seedance = isSeedanceVideoConfig(nextConfig);
+    const asyncJson = nextConfig.apiFormat === "newtoken" || nextConfig.apiFormat === "duomiapi";
+    return {
+        ...nextConfig,
+        videoModel: nextConfig.model,
+        size: seedance || asyncJson ? normalizeSeedanceRatio(nextConfig.size) : normalizeVideoSizeValue(nextConfig.size),
+        videoSeconds: normalizeCanvasVideoSeconds(nextConfig.videoSeconds),
+        vquality: normalizeVideoResolutionValue(nextConfig.vquality),
+        videoGenerateAudio: String(boolConfig(nextConfig.videoGenerateAudio, true)),
+        videoWatermark: String(boolConfig(nextConfig.videoWatermark, false)),
+    };
+}
+
+function normalizeCanvasVideoSeconds(value: string) {
+    if (String(value).trim() === "-1") return "-1";
+    const seconds = Math.floor(Number(value) || 6);
+    return String(Math.max(1, Math.min(15, seconds)));
 }
 
 function isSeedanceVideoConfig(config: AiConfig) {
