@@ -2,13 +2,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, DownloadCloud, Film, FileText, Image as ImageIcon, Music2, RefreshCw, SplitSquareHorizontal, Star, Video, Wand2 } from "lucide-react";
+import { ChevronRight, DownloadCloud, Film, FileText, Image as ImageIcon, MessageSquareText, Music2, RefreshCw, SplitSquareHorizontal, Star, Video, Wand2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeData, type CanvasScriptScene, type Position } from "../types";
+import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasScriptMode, type CanvasScriptScene, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -41,6 +41,7 @@ type CanvasNodeProps = {
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onContentChange: (nodeId: string, content: string) => void;
+    onMetadataChange?: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
@@ -48,6 +49,7 @@ type CanvasNodeProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onGenerateScript?: (node: CanvasNodeData) => void;
     onExpandScript?: (node: CanvasNodeData) => void;
+    onUploadReference?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -64,6 +66,7 @@ type NodeContentRendererProps = {
     batchRecovering: boolean;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     onContentChange: (nodeId: string, content: string) => void;
+    onMetadataChange?: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
@@ -71,6 +74,7 @@ type NodeContentRendererProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onGenerateScript?: (node: CanvasNodeData) => void;
     onExpandScript?: (node: CanvasNodeData) => void;
+    onUploadReference?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
 };
@@ -102,6 +106,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onConnectStart,
     onResize,
     onContentChange,
+    onMetadataChange,
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
@@ -109,6 +114,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onGenerateImage,
     onGenerateScript,
     onExpandScript,
+    onUploadReference,
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -318,12 +324,14 @@ export const CanvasNode = React.memo(function CanvasNode({
                         renderNodeContent={renderNodeContent}
                         mentionReferences={mentionReferences}
                         onContentChange={onContentChange}
+                        onMetadataChange={onMetadataChange}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onPullVideoTask={onPullVideoTask}
                         onGenerateImage={onGenerateImage}
                         onGenerateScript={onGenerateScript}
                         onExpandScript={onExpandScript}
+                        onUploadReference={onUploadReference}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                     />
@@ -551,10 +559,19 @@ function NoteTextContent({ node, theme, isEditingContent, textareaRef, mentionRe
     );
 }
 
-function ScriptContent({ node, theme, onGenerateScript, onExpandScript }: NodeContentRendererProps) {
+const scriptModes: Array<{ value: CanvasScriptMode; label: string; description: string }> = [
+    { value: "storyboard", label: "主题分镜", description: "按主题直接拆镜头" },
+    { value: "image-copy", label: "参考图文案", description: "分析图片并提炼文案" },
+    { value: "image-video", label: "图文转视频", description: "把图文扩展成视频脚本" },
+];
+
+function ScriptContent({ node, theme, mentionReferences, onGenerateScript, onExpandScript, onUploadReference, onMetadataChange }: NodeContentRendererProps) {
     const scenes = node.metadata?.scriptScenes || [];
+    const mode = node.metadata?.scriptMode || "storyboard";
     const hasScenes = scenes.length > 0;
     const summary = hasScenes ? `${scenes.length} 个镜头` : "等待生成分镜";
+    const referenceSummary = summarizeScriptReferences(mentionReferences);
+    const analysis = node.metadata?.scriptAnalysis?.trim();
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden p-4" style={{ color: theme.node.text }}>
@@ -566,11 +583,14 @@ function ScriptContent({ node, theme, onGenerateScript, onExpandScript }: NodeCo
                     <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">脚本生成器</div>
                         <div className="mt-0.5 truncate text-[11px]" style={{ color: theme.node.muted }}>
-                            {summary}
+                            {summary}{referenceSummary ? ` · ${referenceSummary}` : ""}
                         </div>
                     </div>
                 </div>
                 <div className="flex shrink-0 gap-1.5">
+                    <ScriptActionButton title="上传参考图" theme={theme} onClick={() => onUploadReference?.(node)}>
+                        <ImageIcon className="size-3.5" />
+                    </ScriptActionButton>
                     <ScriptActionButton title="生成分镜" theme={theme} onClick={() => onGenerateScript?.(node)}>
                         <Wand2 className="size-3.5" />
                     </ScriptActionButton>
@@ -579,7 +599,38 @@ function ScriptContent({ node, theme, onGenerateScript, onExpandScript }: NodeCo
                     </ScriptActionButton>
                 </div>
             </div>
-            <div className="thin-scrollbar mt-4 flex-1 space-y-2 overflow-y-auto pr-1">
+            <div className="mt-3 grid grid-cols-3 gap-1 rounded-xl border p-1" style={{ borderColor: theme.toolbar.border, background: `${theme.toolbar.panel}80` }}>
+                {scriptModes.map((item) => {
+                    const active = item.value === mode;
+                    return (
+                        <button
+                            key={item.value}
+                            type="button"
+                            className="h-8 rounded-lg px-1 text-[11px] font-medium transition"
+                            style={{ background: active ? theme.toolbar.activeBg : "transparent", color: active ? theme.toolbar.activeText : theme.node.muted }}
+                            title={item.description}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onMetadataChange?.(node.id, { scriptMode: item.value });
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                        >
+                            {item.label}
+                        </button>
+                    );
+                })}
+            </div>
+            {analysis ? (
+                <div className="mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5" style={{ background: `${theme.toolbar.panel}99`, borderColor: theme.toolbar.border, color: theme.node.muted }}>
+                    <div className="mb-1 flex items-center gap-1.5 font-medium" style={{ color: theme.node.text }}>
+                        <MessageSquareText className="size-3.5" />
+                        文案分析
+                    </div>
+                    <div className="line-clamp-3 whitespace-pre-wrap">{analysis}</div>
+                </div>
+            ) : null}
+            <div className="thin-scrollbar mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
                 {hasScenes ? scenes.map((scene, index) => <ScriptSceneCard key={scene.id || index} scene={scene} index={index} theme={theme} />) : <ScriptEmptyState node={node} theme={theme} />}
             </div>
         </div>
@@ -642,6 +693,14 @@ function ScriptSceneCard({ scene, index, theme }: { scene: CanvasScriptScene; in
             </div>
         </div>
     );
+}
+
+function summarizeScriptReferences(references: CanvasResourceReference[]) {
+    const images = references.filter((item) => item.kind === "image").length;
+    const texts = references.filter((item) => item.kind === "text").length;
+    const videos = references.filter((item) => item.kind === "video").length;
+    const parts = [images ? `${images}图` : "", texts ? `${texts}文` : "", videos ? `${videos}视频` : ""].filter(Boolean);
+    return parts.join(" / ");
 }
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {

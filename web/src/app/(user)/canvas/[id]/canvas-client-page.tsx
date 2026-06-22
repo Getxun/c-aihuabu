@@ -56,6 +56,7 @@ import {
     type CanvasImageGenerationType,
     type CanvasNodeData,
     type CanvasNodeMetadata,
+    type CanvasScriptMode,
     type CanvasScriptScene,
     type ConnectionHandle,
     type ContextMenuState,
@@ -227,7 +228,7 @@ function InfiniteCanvasPage() {
     const projectId = params.id;
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
-    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
+    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position; connectToNodeId?: string } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
@@ -802,6 +803,7 @@ function InfiniteCanvasPage() {
                     status: NODE_STATUS_IDLE,
                     fontSize: 13,
                     textKind: "script",
+                    scriptMode: "storyboard",
                     scriptScenes: [],
                 }),
                 title: "脚本生成器",
@@ -824,7 +826,10 @@ function InfiniteCanvasPage() {
                 openConfigDialog(true);
                 return;
             }
-            const userPrompt = (node.metadata?.prompt || node.metadata?.content || "").trim();
+            const inputs = buildNodeGenerationInputs(node.id, nodesRef.current, connectionsRef.current);
+            const mode = node.metadata?.scriptMode || "storyboard";
+            const inputSummary = getInputSummary(inputs);
+            const userPrompt = (node.metadata?.prompt || node.metadata?.content || defaultScriptPrompt(mode, inputSummary)).trim();
             if (!userPrompt) {
                 message.warning("请输入脚本生成需求");
                 setDialogNodeId(node.id);
@@ -835,10 +840,11 @@ function InfiniteCanvasPage() {
             const controller = startGenerationRequest(node.id, node.id, node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
             try {
-                const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(node.id, nodesRef.current, connectionsRef.current, buildScriptGeneratorPrompt(userPrompt)));
+                const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(node.id, nodesRef.current, connectionsRef.current, buildScriptGeneratorPrompt(userPrompt, mode, inputSummary)));
                 const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages(context), () => undefined, { signal: controller.signal });
                 if (controller.signal.aborted) return;
-                const scenes = parseScriptScenes(answer);
+                const result = parseScriptResult(answer);
+                const scenes = result.scenes;
                 if (!scenes.length) throw new Error("脚本生成器没有返回有效分镜，请重试");
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -848,7 +854,8 @@ function InfiniteCanvasPage() {
                                   title: "脚本生成器",
                                   metadata: {
                                       ...item.metadata,
-                                      content: formatScriptScenes(scenes),
+                                      content: formatScriptScenes(scenes, result.analysis),
+                                      scriptAnalysis: result.analysis,
                                       scriptScenes: scenes,
                                       status: NODE_STATUS_SUCCESS,
                                       errorDetails: undefined,
@@ -1656,7 +1663,7 @@ function InfiniteCanvasPage() {
         };
     }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position) => {
+    const createImageFileNode = useCallback(async (file: File, position: Position, connectToNodeId?: string) => {
         const image = await uploadImage(file);
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1671,6 +1678,7 @@ function InfiniteCanvasPage() {
         };
 
         setNodes((prev) => [...prev, newNode]);
+        if (connectToNodeId) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: id, toNodeId: connectToNodeId }]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
@@ -1872,6 +1880,10 @@ function InfiniteCanvasPage() {
 
     const handleNodeContentChange = useCallback((nodeId: string, content: string) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, content } } : node)));
+    }, []);
+
+    const handleNodeMetadataChange = useCallback((nodeId: string, patch: Partial<CanvasNodeMetadata>) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...patch } } : node)));
     }, []);
 
     const toggleBatchExpanded = useCallback((nodeId: string) => {
@@ -2316,8 +2328,8 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, fontSize } } : node)));
     }, []);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
-        uploadTargetRef.current = { nodeId, position };
+    const handleUploadRequest = useCallback((nodeId?: string, position?: Position, connectToNodeId?: string) => {
+        uploadTargetRef.current = { nodeId, position, connectToNodeId };
         imageInputRef.current?.click();
     }, []);
 
@@ -2326,6 +2338,12 @@ function InfiniteCanvasPage() {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+            if (target?.connectToNodeId && !file.type.startsWith("image/")) {
+                message.warning("脚本生成器参考素材请上传图片");
+                uploadTargetRef.current = null;
+                event.target.value = "";
+                return;
+            }
 
             if (target?.nodeId) {
                 if (isAudioFile(file)) {
@@ -2387,14 +2405,18 @@ function InfiniteCanvasPage() {
                 setDialogNodeId(target.nodeId);
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position, target?.connectToNodeId));
             }
 
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
     );
+
+    const uploadScriptReference = useCallback((node: CanvasNodeData) => {
+        handleUploadRequest(undefined, { x: node.position.x - 96, y: node.position.y + node.height / 2 }, node.id);
+    }, [handleUploadRequest]);
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
@@ -3195,6 +3217,7 @@ function InfiniteCanvasPage() {
                             onConnectStart={handleConnectStart}
                             onResize={handleNodeResize}
                             onContentChange={handleNodeContentChange}
+                            onMetadataChange={handleNodeMetadataChange}
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
                             onRetry={(node) => void handleRetryNode(node)}
@@ -3202,6 +3225,7 @@ function InfiniteCanvasPage() {
                             onGenerateImage={generateImageFromTextNode}
                             onGenerateScript={(node) => void generateScriptScenes(node)}
                             onExpandScript={expandScriptScenes}
+                            onUploadReference={uploadScriptReference}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onContextMenu={(event, id) => {
                                 event.preventDefault();
@@ -3614,11 +3638,22 @@ function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
     return { content: audio.url, storageKey: audio.storageKey, status: "success", bytes: audio.bytes, mimeType: audio.mimeType || "audio/mpeg", durationMs: audio.durationMs };
 }
 
-function buildScriptGeneratorPrompt(userPrompt: string) {
+function buildScriptGeneratorPrompt(userPrompt: string, mode: CanvasScriptMode, summary: ReturnType<typeof getInputSummary>) {
+    const modeGuide =
+        mode === "image-copy"
+            ? "当前模式：参考图文案分析。请优先分析上游图片的主体、卖点、风格、构图、可转化的广告文案和适合复刻的视觉元素，再生成可用于批量生图的镜头提示词。"
+            : mode === "image-video"
+              ? "当前模式：图文转视频脚本。请优先分析上游图片/文本，把静态画面扩展为有动作、有镜头调度、有节奏的短视频分镜。"
+              : "当前模式：主题分镜。请根据用户主题和上游文本，生成完整短视频分镜。";
+    const referenceGuide = summary.imageCount
+        ? `上游参考包含 ${summary.imageCount} 张图片。必须先做画面文案分析，并让每个 imagePrompt 延续参考图的主体、风格、构图或品牌语气。`
+        : "如果没有上游图片，请按用户主题自行设计视觉风格。";
+
     return `你是短视频分镜脚本生成器。请根据用户需求和上游参考内容，生成适合批量生图和生视频的结构化分镜。
 
 只输出 JSON，不要输出 markdown，不要解释。JSON 格式必须是：
 {
+  "analysis": "如果有参考图片或上游文本，先用 100 字以内总结画面主体、卖点、文案方向、视觉风格和可延展的视频节奏；没有参考内容时总结创作策略",
   "scenes": [
     {
       "title": "镜头标题",
@@ -3633,18 +3668,42 @@ function buildScriptGeneratorPrompt(userPrompt: string) {
 }
 
 要求：
-1. 默认生成 8 个镜头，除非用户明确要求其他数量。
-2. 每个镜头必须能独立生成图片，再用图片作为参考生成视频。
-3. imagePrompt 和 videoPrompt 不要为空，不要写“同上”。
-4. ratio 只能使用 1:1、16:9、9:16、4:3、3:4。
-5. duration 使用 3 到 15 的秒数字符串。
+1. ${modeGuide}
+2. ${referenceGuide}
+3. 默认生成 8 个镜头，除非用户明确要求其他数量。
+4. 每个镜头必须能独立生成图片，再用图片作为参考生成视频。
+5. imagePrompt 要包含主体、场景、构图、光线、风格、材质、细节和可执行的中文文案方向。
+6. videoPrompt 要包含动作、镜头运动、节奏、情绪和转场建议。
+7. imagePrompt 和 videoPrompt 不要为空，不要写“同上”。
+8. ratio 只能使用 1:1、16:9、9:16、4:3、3:4。
+9. duration 使用 3 到 15 的秒数字符串。
+
+上游输入摘要：文本 ${summary.textCount} 个，图片 ${summary.imageCount} 张，视频 ${summary.videoCount} 个，音频 ${summary.audioCount} 个。
 
 用户需求：
 ${userPrompt}`;
 }
 
-function parseScriptScenes(value: string): CanvasScriptScene[] {
+function defaultScriptPrompt(mode: CanvasScriptMode, summary: ReturnType<typeof getInputSummary>) {
+    if (summary.imageCount && mode === "image-copy") return "分析参考图片的主体、卖点、画面风格和可用于批量生图的广告文案方向。";
+    if (summary.imageCount && mode === "image-video") return "基于参考图片做画面文案分析，并扩展为适合图生视频的短视频分镜脚本。";
+    if (summary.imageCount) return "基于参考图片生成短视频分镜脚本。";
+    return "";
+}
+
+function parseScriptResult(value: string): { analysis: string; scenes: CanvasScriptScene[] } {
     const parsed = parseJsonObject(value);
+    return {
+        analysis: stringField(parsed?.analysis).slice(0, 260),
+        scenes: parseScriptScenesFromParsed(parsed),
+    };
+}
+
+function parseScriptScenes(value: string): CanvasScriptScene[] {
+    return parseScriptScenesFromParsed(parseJsonObject(value));
+}
+
+function parseScriptScenesFromParsed(parsed: any): CanvasScriptScene[] {
     const rawScenes = Array.isArray(parsed?.scenes) ? parsed.scenes : Array.isArray(parsed) ? parsed : [];
     return rawScenes
         .map((item, index) => normalizeScriptScene(item, index))
@@ -3714,8 +3773,9 @@ function normalizeScriptRatio(value: string) {
     return ["1:1", "16:9", "9:16", "4:3", "3:4"].includes(value) ? value : "9:16";
 }
 
-function formatScriptScenes(scenes: CanvasScriptScene[]) {
-    return scenes.map((scene, index) => formatSceneText(scene, index)).join("\n\n");
+function formatScriptScenes(scenes: CanvasScriptScene[], analysis?: string) {
+    const body = scenes.map((scene, index) => formatSceneText(scene, index)).join("\n\n");
+    return analysis ? `文案分析：${analysis}\n\n${body}` : body;
 }
 
 function formatSceneText(scene: CanvasScriptScene, index: number) {

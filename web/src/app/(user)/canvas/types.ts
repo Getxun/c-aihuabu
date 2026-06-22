@@ -21,6 +21,7 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 export type CanvasTextNodeKind = "note" | "script";
+export type CanvasScriptMode = "storyboard" | "image-copy" | "image-video";
 
 export type CanvasScriptScene = {
     id: string;
@@ -41,6 +42,8 @@ export type CanvasNodeMetadata = {
     errorDetails?: string;
     fontSize?: number;
     textKind?: CanvasTextNodeKind;
+    scriptMode?: CanvasScriptMode;
+    scriptAnalysis?: string;
     scriptScenes?: CanvasScriptScene[];
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
