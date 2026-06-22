@@ -63,7 +63,12 @@ export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" 
 
 export function isSeedanceVideoModel(model: string) {
     const value = model.toLowerCase();
-    return value.includes("seedance") || value.includes("doubao-seedance");
+    return value.includes("seedance") || value.includes("doubao-seedance") || isCaiSeedanceAliasModel(value);
+}
+
+export function isCaiSeedanceAliasModel(model: string) {
+    const value = model.toLowerCase();
+    return value === "videos" || value === "videos_stable";
 }
 
 export function isGrokImagineVideo15Model(model: string) {

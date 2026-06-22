@@ -62,6 +62,7 @@ const duomiModels = [
     "grok-video",
     "grok-video-1.5",
 ];
+const caiVideoModels = ["videos", "videos_stable", "happyhorse", "grok-imagine-video"];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
 const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
@@ -194,7 +195,7 @@ export function AppConfigModal() {
 
     const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
         const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        const models = apiFormat === "duomiapi" ? duomiModels : !channel.models.length && apiFormat === "newtoken" ? newTokenVideoModels : channel.models;
+        const models = apiFormat === "duomiapi" ? duomiModels : !channel.models.length && apiFormat === "newtoken" ? newTokenVideoModels : !channel.models.length && apiFormat === "openai-json" ? caiVideoModels : channel.models;
         updateChannel(channel.id, { apiFormat, baseUrl, models });
     };
 
@@ -469,6 +470,13 @@ export function AppConfigModal() {
                                                         <div className="mb-2 flex justify-end">
                                                             <Button size="small" onClick={() => updateChannel(channel.id, { models: newTokenVideoModels })}>
                                                                 填入 NewToken 视频模型
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
+                                                    {channel.apiFormat === "openai-json" ? (
+                                                        <div className="mb-2 flex justify-end">
+                                                            <Button size="small" onClick={() => updateChannel(channel.id, { models: caiVideoModels })}>
+                                                                填入 Cai 视频模型
                                                             </Button>
                                                         </div>
                                                     ) : null}

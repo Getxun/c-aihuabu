@@ -738,7 +738,7 @@ function isCaiReachableUrl(value: string) {
 
 function isCaiSdModel(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("sd");
+    return value.includes("seedance") || value.includes("sd") || value === "videos" || value === "videos_stable";
 }
 
 function isLikelyCaiVideoChannel(baseUrl: string) {
