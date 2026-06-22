@@ -72,6 +72,23 @@ type ImageApiResponse = {
     code?: number;
     msg?: string;
 };
+type ImageTaskResponse = {
+    id?: string;
+    task_id?: string;
+    taskId?: string;
+    status?: string;
+    state?: string;
+    task_status?: string;
+    url?: string;
+    image_url?: string;
+    output_url?: string;
+    metadata?: { result_urls?: string[] };
+    output?: { url?: string; image_url?: string }[] | { url?: string; image_url?: string };
+    data?: ImageTaskResponse | null;
+    error?: { message?: string };
+    code?: number;
+    msg?: string;
+};
 type GeminiPart = {
     text?: string;
     inlineData?: { mimeType?: string; data?: string };
@@ -111,6 +128,8 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+const NEW_TOKEN_IMAGE_TIMEOUT_MS = 30 * 60 * 1000;
+const NEW_TOKEN_IMAGE_POLL_MS = 2500;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -205,6 +224,45 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
+}
+
+function isNewTokenAsyncImageModel(config: AiConfig) {
+    const model = (config.model || config.imageModel).trim().toLowerCase();
+    return config.apiFormat === "newtoken" && /^gpt-image2-(1k|2k|4k)$/.test(model);
+}
+
+function unwrapImageTask(payload: ImageTaskResponse): ImageTaskResponse {
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
+    if (payload.error?.message) throw new Error(payload.error.message);
+    return payload.data && typeof payload.data === "object" ? payload.data : payload;
+}
+
+function readImageTaskId(payload: ImageTaskResponse) {
+    return String(payload.id || payload.task_id || payload.taskId || "").trim();
+}
+
+function normalizeImageTaskStatus(status: string | undefined) {
+    const value = String(status || "").toLowerCase();
+    if (["completed", "complete", "succeeded", "success", "done"].includes(value)) return "completed";
+    if (["failed", "failure", "error", "cancelled", "canceled", "expired"].includes(value)) return "failed";
+    return "pending";
+}
+
+function readAsyncImageUrl(payload: ImageTaskResponse): string {
+    const output = Array.isArray(payload.output) ? payload.output[0] : payload.output;
+    const candidates = [
+        payload.image_url,
+        payload.url,
+        payload.output_url,
+        payload.metadata?.result_urls?.[0],
+        output?.image_url,
+        output?.url,
+        payload.data?.image_url,
+        payload.data?.url,
+        payload.data?.output_url,
+        payload.data?.metadata?.result_urls?.[0],
+    ];
+    return String(candidates.find((url) => typeof url === "string" && url.trim()) || "").trim();
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -591,6 +649,58 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
     return parseGeminiImagePayload(response.data);
 }
 
+async function requestNewTokenAsyncImages(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, options?: RequestOptions) {
+    const requests = Array.from({ length: count }, () => requestNewTokenAsyncImageOnce(config, prompt, references, options));
+    return (await Promise.all(requests)).flat();
+}
+
+async function requestNewTokenAsyncImageOnce(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    try {
+        const imageUrls = await Promise.all(references.map((image) => resolveNewTokenReferenceImageUrl(image, options)));
+        const created = unwrapImageTask(
+            (
+                await postWithProxyFallback<ImageTaskResponse>(
+                    config,
+                    "/videos",
+                    {
+                        model: config.model,
+                        prompt: withSystemPrompt(config, prompt),
+                        seconds: "4",
+                        aspect_ratio: normalizeNewTokenImageRatio(config.size),
+                        ...(imageUrls.length ? { images: imageUrls } : {}),
+                    },
+                    "application/json",
+                    options,
+                )
+            ).data,
+        );
+        const taskId = readImageTaskId(created);
+        if (!taskId) throw new Error("NewToken 图片异步接口没有返回任务 ID");
+        const imageUrl = await pollNewTokenImageTask(config, taskId, options);
+        return [{ id: nanoid(), dataUrl: imageUrl }];
+    } catch (error) {
+        throw new Error(readAxiosError(error, "NewToken 图片任务失败"));
+    }
+}
+
+async function pollNewTokenImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
+    const maxAttempts = Math.ceil(NEW_TOKEN_IMAGE_TIMEOUT_MS / NEW_TOKEN_IMAGE_POLL_MS);
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const task = unwrapImageTask((await getWithProxyFallback<ImageTaskResponse>(config, `/videos/${taskId}`, options)).data);
+        const status = normalizeImageTaskStatus(task.status || task.state || task.task_status);
+        const imageUrl = readAsyncImageUrl(task);
+        if (status === "completed" || imageUrl) {
+            if (!imageUrl) throw new Error("NewToken 图片任务成功但没有返回图片 URL");
+            return imageUrl;
+        }
+        if (status === "failed") throw new Error(task.error?.message || task.msg || "NewToken 图片生成失败");
+        if (attempt === maxAttempts - 1) throw new Error("NewToken 图片生成超时，请稍后重试");
+        await delay(NEW_TOKEN_IMAGE_POLL_MS, options?.signal);
+    }
+    throw new Error("NewToken 图片生成超时，请稍后重试");
+}
+
 function parseGeminiImagePayload(payload: GeminiPayload) {
     validateGeminiPayload(payload);
     const images =
@@ -610,6 +720,9 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    if (isNewTokenAsyncImageModel(requestConfig)) {
+        return requestNewTokenAsyncImages(requestConfig, prompt, [], n, options);
+    }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImages(requestConfig, prompt, [], n, options);
@@ -646,6 +759,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
+    if (isNewTokenAsyncImageModel(requestConfig)) {
+        if (mask) throw new Error("NewToken gpt-image2 异步接口暂不支持蒙版编辑");
+        return requestNewTokenAsyncImages(requestConfig, requestPrompt, references, n, options);
+    }
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
         try {
@@ -762,6 +879,74 @@ async function postWithProxyFallback<T>(config: AiConfig, path: string, body: un
         if (!axios.isAxiosError(error) || error.response || aiApiUrl(config, path) !== directUrl) throw error;
         return await request(buildForcedProxiedUrl(directUrl));
     }
+}
+
+async function getWithProxyFallback<T>(config: AiConfig, path: string, options?: RequestOptions) {
+    const directUrl = buildApiUrl(config.baseUrl, path);
+    const request = (url: string) => axios.get<T>(url, { headers: aiHeaders(config), signal: options?.signal });
+    try {
+        return await request(aiApiUrl(config, path));
+    } catch (error) {
+        if (!axios.isAxiosError(error) || error.response || aiApiUrl(config, path) !== directUrl) throw error;
+        return await request(buildForcedProxiedUrl(directUrl));
+    }
+}
+
+async function resolveNewTokenReferenceImageUrl(image: ReferenceImage, options?: RequestOptions) {
+    const directUrl = String(image.url || image.dataUrl || "").trim();
+    if (isReachableHttpsUrl(directUrl)) return directUrl;
+    const file = await dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) });
+    const form = new FormData();
+    form.append("file", file);
+    const response = await axios.post<{ code?: number; data?: { url?: string }; msg?: string }>("/api/uploads/references", form, { signal: options?.signal });
+    const url = response.data?.data?.url;
+    if (!url) throw new Error(response.data?.msg || "参考图片上传失败");
+    if (!isReachableHttpsUrl(url)) throw new Error("参考图片已上传到本地服务，但返回地址不是公网 HTTPS URL。请在 Docker/部署环境配置 C_AI_PUBLIC_BASE_URL=https://你的域名，并确保外网可访问。");
+    return url;
+}
+
+function normalizeNewTokenImageRatio(value: string) {
+    const ratio = value.trim();
+    if (["16:9", "9:16", "3:4", "4:3", "1:1"].includes(ratio)) return ratio;
+    if (ratio === "3:2") return "4:3";
+    if (ratio === "2:3") return "3:4";
+    const dimensions = parseImageDimensions(ratio);
+    if (!dimensions) return "1:1";
+    const gcdValue = gcd(dimensions.width, dimensions.height);
+    const normalized = `${dimensions.width / gcdValue}:${dimensions.height / gcdValue}`;
+    return ["16:9", "9:16", "3:4", "4:3", "1:1"].includes(normalized) ? normalized : "1:1";
+}
+
+function gcd(a: number, b: number): number {
+    return b ? gcd(b, a % b) : Math.abs(a);
+}
+
+function isReachableHttpsUrl(value: string) {
+    if (!/^https:\/\//i.test(value || "")) return false;
+    try {
+        const host = new URL(value).hostname.toLowerCase();
+        return host !== "localhost" && host !== "127.0.0.1" && !host.endsWith(".local");
+    } catch {
+        return false;
+    }
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
 }
 
 const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "model" | "systemPrompt"> = {
