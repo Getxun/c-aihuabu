@@ -5,15 +5,27 @@ import { NextRequest, NextResponse } from "next/server";
 const uploadDir = process.env.C_AI_UPLOAD_DIR || path.join(process.cwd(), "data", "uploads", "references");
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
+    return serveReferenceFile(params, false);
+}
+
+export async function HEAD(_request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
+    return serveReferenceFile(params, true);
+}
+
+async function serveReferenceFile(params: Promise<{ name: string }>, headOnly: boolean) {
     const { name } = await params;
     if (!/^[a-zA-Z0-9_-]+\.(png|jpg|jpeg|webp|gif|mp4|mov|mp3|wav)$/i.test(name)) return new NextResponse("Not found", { status: 404 });
     const filePath = path.join(uploadDir, name);
     const data = await readFile(filePath).catch(() => null);
     if (!data) return new NextResponse("Not found", { status: 404 });
-    return new NextResponse(data, {
+    return new NextResponse(headOnly ? null : data, {
         headers: {
             "Content-Type": contentType(name),
+            "Content-Length": String(data.byteLength),
             "Cache-Control": "public, max-age=604800, immutable",
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": `inline; filename="${name}"`,
+            "X-Content-Type-Options": "nosniff",
         },
     });
 }

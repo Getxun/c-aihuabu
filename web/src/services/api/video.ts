@@ -687,7 +687,22 @@ async function uploadCaiReferenceFile(file: File, options?: RequestOptions) {
     const url = response.data?.data?.url;
     if (!url) throw new Error(response.data?.msg || "参考图片上传失败");
     if (!isCaiReachableUrl(url)) throw new Error("参考素材已上传到本地服务，但返回地址不是公网 HTTPS URL。请在 Docker/部署环境配置 C_AI_PUBLIC_BASE_URL=https://你的域名，并确保外网可访问。");
+    await assertUploadedReferenceReachable(url, file.type, options);
     return url;
+}
+
+async function assertUploadedReferenceReachable(url: string, mimeType: string, options?: RequestOptions) {
+    try {
+        const response = await axios.head(url, { signal: options?.signal });
+        const contentType = String(response.headers["content-type"] || "").toLowerCase();
+        const contentLength = Number(response.headers["content-length"] || 0);
+        if (mimeType.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType || "empty"}`);
+        if (contentLength <= 0) throw new Error("Content-Length 为空");
+    } catch (error) {
+        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        const reason = error instanceof Error ? error.message : "无法访问";
+        throw new Error(`参考素材公网地址自检失败：${reason}。请确认 ${url} 可在公网无登录访问，且反向代理没有拦截 HEAD/图片读取。`);
+    }
 }
 
 function isCaiReachableUrl(value: string) {
