@@ -124,6 +124,7 @@ async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: 
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    assertGrokImagineVideo15Reference(model, imageUrls);
     const payload = buildNewTokenVideoPayload(config, model, prompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
@@ -141,6 +142,7 @@ async function createDuomiVideoTask(config: AiConfig, model: string, prompt: str
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    assertGrokImagineVideo15Reference(modelName, imageUrls);
     const isGrok = modelName.toLowerCase().includes("grok");
     const payload = isGrok ? buildDuomiGrokPayload(config, modelName, prompt, imageUrls) : buildDuomiSeedancePayload(config, modelName, prompt, imageUrls, videoUrls, audioUrls);
     const path = isGrok ? "/videos/generations" : "/contents/generations/tasks";
@@ -485,6 +487,11 @@ function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: stri
         aspect_ratio: aspectRatio,
     };
 
+    if (lowerModel.includes("grok-imagine-video-1.5")) {
+        payload.input_reference = imageUrls[0];
+        return payload;
+    }
+
     if (lowerModel.includes("sora-vip3-pro")) {
         payload.seconds = String(normalizeNewTokenDuration(config.videoSeconds, lowerModel));
         payload.resolution = normalizeVideoResolution(config.vquality);
@@ -572,14 +579,19 @@ function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: stri
 
 function buildDuomiGrokPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[]) {
     const duration = Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
-    return {
+    const payload: Record<string, any> = {
         model,
         prompt,
         aspect_ratio: normalizeNewTokenAspectRatio(config.size),
         duration,
         quality: "720p",
-        image_urls: model === "grok-video-1.5" ? imageUrls.slice(0, 1) : imageUrls.slice(0, 7),
     };
+    if (model.toLowerCase().includes("grok-imagine-video-1.5") && imageUrls[0]) {
+        payload.input_reference = imageUrls[0];
+    } else {
+        payload.image_urls = model === "grok-video-1.5" ? imageUrls.slice(0, 1) : imageUrls.slice(0, 7);
+    }
+    return payload;
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse) {
@@ -753,7 +765,7 @@ function isLikelyCaiVideoChannel(baseUrl: string) {
 function assertCaiVideoMode(model: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
     const capabilities = caiVideoModelCapabilities(model);
     const mode = resolveCaiVideoMode(model, imageUrls, videoUrls, audioUrls, videoMode);
-    if (capabilities.requiresImage && !imageUrls.length) throw new Error("grok-imagine-video-1.5-preview 必须连接图片后才能生成视频");
+    assertGrokImagineVideo15Reference(model, imageUrls);
     if (mode === "text-to-video" && !capabilities.textToVideo) throw new Error("当前模型不支持纯文字生成视频，请先连接图片素材");
     if (mode === "first-last") {
         if (!capabilities.firstLastFrame) throw new Error("当前模型不支持首尾帧模式，请切换支持首尾帧的模型");
@@ -769,6 +781,10 @@ function assertCaiVideoMode(model: string, imageUrls: string[], videoUrls: strin
     }
 }
 
+function assertGrokImagineVideo15Reference(model: string, imageUrls: string[]) {
+    if (caiVideoModelCapabilities(model).requiresImage && !imageUrls.length) throw new Error("grok-imagine-video-1.5-preview 必须连接图片后才能生成视频");
+}
+
 function appendCaiReferences(payload: Record<string, any>, model: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
     const capabilities = caiVideoModelCapabilities(model);
     const mode = resolveCaiVideoMode(model, imageUrls, videoUrls, audioUrls, videoMode);
@@ -782,7 +798,7 @@ function appendCaiReferences(payload: Record<string, any>, model: string, imageU
         return;
     }
     if (capabilities.requiresImage && imageUrls[0]) {
-        payload.image_url = imageUrls[0];
+        payload.input_reference = imageUrls[0];
         return;
     }
     if (imageUrls.length > 0) {
