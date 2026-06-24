@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUp, Camera, LoaderCircle, Zap, Wand2, Plus, ChevronDown, Palette } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Camera, LoaderCircle, Music2, Wand2, Plus, ChevronDown, Palette } from "lucide-react";
 import { Button, Tooltip, Dropdown, message } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -47,15 +47,18 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const [activeVideoTab, setActiveVideoTab] = useState<string>(node.metadata?.videoMode || "text-to-video");
     const [cameraMovement, setCameraMovement] = useState<string>(node.metadata?.cameraMovement || "自适应");
+    const [mentionTriggerKey, setMentionTriggerKey] = useState(0);
+    const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
     const imageRefs = mentionReferences.filter((r) => r.kind === "image");
     const videoRefs = mentionReferences.filter((r) => r.kind === "video");
+    const audioRefs = mentionReferences.filter((r) => r.kind === "audio");
     const videoModelName = modelOptionName(config.model || config.videoModel);
     const videoCapabilities = caiVideoModelCapabilities(videoModelName);
     const isSeedanceVideo = mode === "video" && isSeedanceVideoModel(videoModelName);
     const supportsRichVideoRefs = videoCapabilities.allAroundReference || isSeedanceVideo;
-    const totalRefs = imageRefs.length + (supportsRichVideoRefs ? videoRefs.length : 0);
-    const activeRefs = mentionReferences.filter((r) => r.active && (supportsRichVideoRefs || r.kind === "image"));
+    const totalRefs = imageRefs.length + (supportsRichVideoRefs ? videoRefs.length + audioRefs.length : 0);
+    const activeRefs = mentionReferences.filter((r) => r.active);
 
     const videoTabs = [
         { id: "text-to-video", label: "文生视频", enabled: videoCapabilities.textToVideo, tooltip: "当前模型必须连接图片后生成视频" },
@@ -164,14 +167,19 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     };
 
     const handleAppendMention = () => {
-        const nextPrompt = prompt.endsWith(" ") || prompt === "" ? `${prompt}@` : `${prompt} @`;
+        const input = promptInputRef.current;
+        const start = input?.selectionStart ?? prompt.length;
+        const end = input?.selectionEnd ?? start;
+        const prefix = start > 0 && !/\s/.test(prompt[start - 1] || "") ? " " : "";
+        const nextPrompt = `${prompt.slice(0, start)}${prefix}@${prompt.slice(end)}`;
+        const nextCursor = start + prefix.length + 1;
         updatePrompt(nextPrompt);
         setTimeout(() => {
-            const el = document.querySelector(`[data-node-id="${node.id}"] textarea`) as HTMLTextAreaElement;
-            if (el) {
-                el.focus();
-                el.setSelectionRange(el.value.length, el.value.length);
+            if (input) {
+                input.focus();
+                input.setSelectionRange(nextCursor, nextCursor);
             }
+            setMentionTriggerKey((value) => value + 1);
         }, 50);
     };
 
@@ -244,13 +252,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                         style={{ background: theme.node.fill }}
                                     >
                                         {isImage && ref.previewUrl ? (
-                                            <img src={ref.previewUrl} className="w-full h-full object-cover" alt="" />
+                                            <img src={ref.previewUrl} className="h-full w-full object-cover" alt="" />
                                         ) : isVideo && ref.previewUrl ? (
-                                            <video src={ref.previewUrl} className="w-full h-full object-cover" muted />
+                                            <video src={ref.previewUrl} className="h-full w-full object-cover" muted />
+                                        ) : ref.kind === "audio" ? (
+                                            <Music2 className="size-4 text-gray-500/70 dark:text-zinc-300/80" />
                                         ) : (
-                                            <div className="text-[10px] font-bold text-gray-500/60 select-none">
-                                                {ref.kind === "text" ? "TXT" : "AUD"}
-                                            </div>
+                                            <div className="select-none text-[10px] font-bold text-gray-500/60">TXT</div>
                                         )}
                                         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/thumb:opacity-100">
                                             <span className="text-[12px] text-white font-bold">×</span>
@@ -262,6 +270,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </div>
                 )}
                 <CanvasResourceMentionTextarea
+                    ref={promptInputRef}
                     value={prompt}
                     references={mentionReferences}
                     onChange={updatePrompt}
@@ -269,6 +278,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className={`thin-scrollbar w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 outline-none focus:ring-0 ${mode === "video" ? "min-h-28 max-h-44" : "h-20"}`}
                     style={{ color: theme.node.text }}
                     placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent, mentionReferences.length > 0)}
+                    mentionTriggerKey={mentionTriggerKey}
                 />
             </div>
 
@@ -437,7 +447,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean, hasReferences = false) {
-    const hint = hasReferences ? "，按 @ 引用连接的图片或视频" : "";
+    const hint = hasReferences ? "，按 @ 引用连接的图片、视频或音频" : "";
     if (mode === "video") return `描述要生成的视频内容${hint}`;
     if (mode === "audio") return `描述要生成的音频内容${hint}`;
     if (mode === "image") return hasImageContent ? `请输入你想要把这张图修改成什么${hint}` : `描述要生成的图片内容${hint}`;

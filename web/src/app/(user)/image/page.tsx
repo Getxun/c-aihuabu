@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Button, Checkbox, Drawer, Empty, Image, Input, message, Modal, Tag, Tooltip, Typography } from "antd";
+import { Button, Checkbox, Drawer, Empty, Image, message, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
@@ -10,6 +10,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { CanvasResourceMentionTextarea } from "@/app/(user)/canvas/components/canvas-resource-mention-textarea";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -20,6 +21,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
+import type { CanvasResourceReference } from "@/app/(user)/canvas/utils/canvas-resource-references";
 
 type GeneratedImage = {
     id: string;
@@ -70,6 +72,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 
 export default function ImagePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -85,6 +88,7 @@ export default function ImagePage() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [mentionTriggerKey, setMentionTriggerKey] = useState(0);
     const [startedAt, setStartedAt] = useState(0);
     const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
@@ -95,6 +99,7 @@ export default function ImagePage() {
     const canGenerate = Boolean(prompt.trim());
     const running = runningCount > 0;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const promptReferences = buildImagePromptReferences(references);
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -265,6 +270,25 @@ export default function ImagePage() {
         setPreviewLog(null);
     };
 
+    const handleAppendMention = () => {
+        const input = promptInputRef.current;
+        const start = input?.selectionStart ?? prompt.length;
+        const end = input?.selectionEnd ?? start;
+        const prefix = start > 0 && !/\s/.test(prompt[start - 1] || "") ? " " : "";
+        const nextCursor = start + prefix.length + 1;
+        setPrompt((value) => {
+            const safeStart = Math.min(start, value.length);
+            const safeEnd = Math.min(end, value.length);
+            return `${value.slice(0, safeStart)}${prefix}@${value.slice(safeEnd)}`;
+        });
+        window.setTimeout(() => {
+            if (!input) return;
+            input.focus();
+            input.setSelectionRange(nextCursor, nextCursor);
+            setMentionTriggerKey((key) => key + 1);
+        }, 0);
+    };
+
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
         void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
@@ -379,7 +403,28 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述画面主体、风格、构图、光线和用途" />
+                                <div className="relative">
+                                    <CanvasResourceMentionTextarea
+                                        ref={promptInputRef}
+                                        value={prompt}
+                                        references={promptReferences}
+                                        onChange={setPrompt}
+                                        mentionTriggerKey={mentionTriggerKey}
+                                        className="thin-scrollbar block min-h-[168px] w-full resize-none rounded-md border border-stone-300 bg-white px-3 py-2 pr-11 text-sm leading-5 text-stone-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:focus:border-blue-400"
+                                        placeholder="描述画面主体、风格、构图、光线和用途"
+                                    />
+                                    <Tooltip title="引用参考图 (@)">
+                                        <button
+                                            type="button"
+                                            onClick={handleAppendMention}
+                                            disabled={!references.length}
+                                            className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-sm font-semibold text-stone-400 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                            aria-label="引用参考图"
+                                        >
+                                            @
+                                        </button>
+                                    </Tooltip>
+                                </div>
                             </div>
 
                             <div className="min-w-0">
@@ -607,6 +652,18 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
 
 function updateResultAt(results: GenerationResult[], index: number, next: Partial<GenerationResult>) {
     return results.map((item, itemIndex) => (itemIndex === index ? { ...item, ...next } : item));
+}
+
+function buildImagePromptReferences(references: ReferenceImage[]): CanvasResourceReference[] {
+    return references.map((image, index) => ({
+        id: image.id,
+        nodeId: image.id,
+        kind: "image",
+        label: imageReferenceLabel(index),
+        title: image.name || imageReferenceLabel(index),
+        previewUrl: image.dataUrl,
+        active: true,
+    }));
 }
 
 function LogPanel({

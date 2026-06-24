@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
@@ -21,9 +21,10 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     onSubmit?: () => void;
     containerClassName?: string;
     highlightLabels?: boolean;
+    mentionTriggerKey?: number;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props }, forwardedRef) {
+export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, mentionTriggerKey, ...props }, forwardedRef) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -74,6 +75,24 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         closeMention();
         updateValue(next, mention.start + insertText.length);
     };
+
+    useEffect(() => {
+        if (!mentionTriggerKey) return;
+        requestAnimationFrame(() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            const cursor = textarea.selectionStart ?? value.length;
+            textarea.focus();
+            const prefix = value.slice(0, cursor);
+            const match = /(^|\s)@([^\s@]*)$/.exec(prefix);
+            if (!match || !references.some((item) => item.active)) {
+                closeMention();
+                return;
+            }
+            setMention({ start: cursor - match[2].length - 1, query: match[2] });
+            setActiveIndex(0);
+        });
+    }, [mentionTriggerKey]);
 
     const syncOverlayScroll = () => {
         if (!overlayRef.current || !textareaRef.current) return;
