@@ -2,12 +2,13 @@
 
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Button, Checkbox, Drawer, Empty, Input, message, Modal, Tag, Typography } from "antd";
+import { Button, Checkbox, Drawer, Empty, message, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { CanvasResourceMentionTextarea } from "@/app/(user)/canvas/components/canvas-resource-mention-textarea";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
@@ -22,11 +23,14 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import type { CanvasResourceReference } from "@/app/(user)/canvas/utils/canvas-resource-references";
 
 type GeneratedVideo = {
     id: string;
     url: string;
     storageKey: string;
+    thumbnailUrl?: string;
+    thumbnailStorageKey?: string;
     durationMs: number;
     width: number;
     height: number;
@@ -73,6 +77,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 
 export default function VideoPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -91,6 +96,7 @@ export default function VideoPage() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [mentionTriggerKey, setMentionTriggerKey] = useState(0);
     const [startedAt, setStartedAt] = useState(0);
     const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
@@ -100,6 +106,7 @@ export default function VideoPage() {
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const running = runningCount > 0;
+    const promptReferences = buildVideoPromptReferences(references, videoReferences, audioReferences);
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -233,11 +240,11 @@ export default function VideoPage() {
         addAsset({
             kind: "video",
             title: "生成视频",
-            coverUrl: "",
+            coverUrl: video.thumbnailUrl || "",
             tags: [],
             source: "视频创作台",
             data: { url: video.url, storageKey: video.storageKey, width: video.width, height: video.height, bytes: video.bytes, mimeType: video.mimeType },
-            metadata: { source: "video-page", prompt },
+            metadata: { source: "video-page", prompt, thumbnailStorageKey: video.thumbnailStorageKey },
         });
         message.success("已加入我的素材");
     };
@@ -252,6 +259,25 @@ export default function VideoPage() {
             setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
         }
         setAssetPickerOpen(false);
+    };
+
+    const handleAppendMention = () => {
+        const input = promptInputRef.current;
+        const start = input?.selectionStart ?? prompt.length;
+        const end = input?.selectionEnd ?? start;
+        const prefix = start > 0 && !/\s/.test(prompt[start - 1] || "") ? " " : "";
+        const nextCursor = start + prefix.length + 1;
+        setPrompt((value) => {
+            const safeStart = Math.min(start, value.length);
+            const safeEnd = Math.min(end, value.length);
+            return `${value.slice(0, safeStart)}${prefix}@${value.slice(safeEnd)}`;
+        });
+        window.setTimeout(() => {
+            if (!input) return;
+            input.focus();
+            input.setSelectionRange(nextCursor, nextCursor);
+            setMentionTriggerKey((key) => key + 1);
+        }, 0);
     };
 
     const createSession = () => {
@@ -269,7 +295,7 @@ export default function VideoPage() {
     const deleteSelectedLogs = () => {
         const mediaKeys = logs
             .filter((log) => selectedLogIds.includes(log.id))
-            .map((log) => log.video?.storageKey)
+            .flatMap((log) => [log.video?.storageKey, log.video?.thumbnailStorageKey])
             .filter((key): key is string => Boolean(key));
         void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
@@ -330,10 +356,13 @@ export default function VideoPage() {
                 }
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
+                    const thumbnail = await createStoredVideoThumbnail(stored.url);
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
                         storageKey: stored.storageKey,
+                        thumbnailUrl: thumbnail?.url,
+                        thumbnailStorageKey: thumbnail?.storageKey,
                         durationMs: Date.now() - latestLog.createdAt,
                         width: stored.width || 1280,
                         height: stored.height || 720,
@@ -420,7 +449,29 @@ export default function VideoPage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
+                                <div className="relative">
+                                    <CanvasResourceMentionTextarea
+                                        ref={promptInputRef}
+                                        value={prompt}
+                                        references={promptReferences}
+                                        onChange={setPrompt}
+                                        mentionTriggerKey={mentionTriggerKey}
+                                        className="thin-scrollbar block min-h-[168px] w-full resize-none rounded-md border border-stone-300 bg-white px-3 py-2 pr-11 text-sm leading-5 text-stone-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:focus:border-blue-400"
+                                        placeholder="描述镜头运动、主体动作、场景氛围和画面风格"
+                                    />
+                                    <Tooltip title="引用参考素材 (@)">
+                                        <button
+                                            type="button"
+                                            onMouseDown={(event) => event.preventDefault()}
+                                            onClick={handleAppendMention}
+                                            disabled={!promptReferences.length}
+                                            className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-sm font-semibold text-stone-400 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                            aria-label="引用参考素材"
+                                        >
+                                            @
+                                        </button>
+                                    </Tooltip>
+                                </div>
                             </div>
 
                             <div className="min-w-0">
@@ -684,16 +735,25 @@ function LogPanel({
 }
 
 function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
+    const previewUrl = log.video?.thumbnailUrl || log.video?.url;
+
     return (
         <button type="button" className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`} onClick={onClick}>
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">
                 <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                 <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
+                    <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2">
+                        <div className="flex aspect-video w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-black/90">
+                            {previewUrl ? log.video?.thumbnailUrl ? <img src={previewUrl} alt="" className="size-full object-cover" /> : <video src={previewUrl} className="size-full object-cover" muted preload="metadata" /> : <VideoIcon className="size-4 text-white/55" />}
+                        </div>
+                        <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                                <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
+                                <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
+                                <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div className="grid justify-items-end gap-2">
@@ -723,7 +783,13 @@ async function readStoredLogs() {
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
+    const video = log.video
+        ? {
+              ...log.video,
+              url: log.video.storageKey ? await resolveMediaUrl(log.video.storageKey, log.video.url) : log.video.url,
+              thumbnailUrl: log.video.thumbnailStorageKey ? await resolveMediaUrl(log.video.thumbnailStorageKey, log.video.thumbnailUrl) : log.video.thumbnailUrl,
+          }
+        : log.video;
     const videoReferences = await Promise.all(
         (log.videoReferences || []).map(async (item) => ({
             ...item,
@@ -771,8 +837,62 @@ function serializeLog(log: GenerationLog): GenerationLog {
         references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
         videoReferences: log.videoReferences.map((item) => (item.storageKey ? { ...item, url: "" } : item)),
         audioReferences: log.audioReferences.map((item) => (item.storageKey ? { ...item, url: "" } : item)),
-        video: log.video?.storageKey ? { ...log.video, url: "" } : log.video,
+        video: log.video ? { ...log.video, url: log.video.storageKey ? "" : log.video.url, thumbnailUrl: log.video.thumbnailStorageKey ? "" : log.video.thumbnailUrl } : log.video,
     };
+}
+
+async function createStoredVideoThumbnail(url: string) {
+    try {
+        const blob = await captureVideoFrame(url);
+        if (!blob) return undefined;
+        return uploadMediaFile(blob, "video-thumbnail");
+    } catch {
+        return undefined;
+    }
+}
+
+function captureVideoFrame(url: string) {
+    return new Promise<Blob | undefined>((resolve) => {
+        const video = document.createElement("video");
+        let settled = false;
+        const finish = (blob?: Blob) => {
+            if (settled) return;
+            settled = true;
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+            resolve(blob);
+        };
+        const draw = () => {
+            try {
+                const width = video.videoWidth || 1280;
+                const height = video.videoHeight || 720;
+                const canvas = document.createElement("canvas");
+                const scale = Math.min(1, 320 / width);
+                canvas.width = Math.max(1, Math.round(width * scale));
+                canvas.height = Math.max(1, Math.round(height * scale));
+                canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob((blob) => finish(blob || undefined), "image/jpeg", 0.72);
+            } catch {
+                finish();
+            }
+        };
+        video.crossOrigin = "anonymous";
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        video.onloadeddata = () => {
+            if (Number.isFinite(video.duration) && video.duration > 0.2) {
+                video.currentTime = 0.1;
+                return;
+            }
+            draw();
+        };
+        video.onseeked = draw;
+        video.onerror = () => finish();
+        video.src = url;
+        video.load();
+    });
 }
 
 function isSupportedAudioFile(file: File) {
@@ -805,6 +925,38 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
     const next = [...items];
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
     return next;
+}
+
+function buildVideoPromptReferences(images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]): CanvasResourceReference[] {
+    return [
+        ...images.map((image, index) => ({
+            id: image.id,
+            nodeId: image.id,
+            kind: "image" as const,
+            label: seedanceReferenceLabel("image", index),
+            title: image.name || seedanceReferenceLabel("image", index),
+            previewUrl: image.dataUrl,
+            active: true,
+        })),
+        ...videos.map((video, index) => ({
+            id: video.id,
+            nodeId: video.id,
+            kind: "video" as const,
+            label: seedanceReferenceLabel("video", index),
+            title: video.name || seedanceReferenceLabel("video", index),
+            previewUrl: video.url,
+            active: true,
+        })),
+        ...audios.map((audio, index) => ({
+            id: audio.id,
+            nodeId: audio.id,
+            kind: "audio" as const,
+            label: seedanceReferenceLabel("audio", index),
+            title: audio.name || seedanceReferenceLabel("audio", index),
+            previewUrl: audio.url,
+            active: true,
+        })),
+    ];
 }
 
 function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {

@@ -299,6 +299,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <Tooltip title="引用素材 (@)">
                         <button
                             type="button"
+                            onMouseDown={(event) => event.preventDefault()}
                             onClick={handleAppendMention}
                             className="flex size-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                         >

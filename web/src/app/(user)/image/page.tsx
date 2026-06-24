@@ -416,6 +416,7 @@ export default function ImagePage() {
                                     <Tooltip title="引用参考图 (@)">
                                         <button
                                             type="button"
+                                            onMouseDown={(event) => event.preventDefault()}
                                             onClick={handleAppendMention}
                                             disabled={!references.length}
                                             className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-sm font-semibold text-stone-400 transition hover:bg-stone-100 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-stone-800 dark:hover:text-stone-100"

@@ -37,23 +37,13 @@ const modelGroups: ModelGroup[] = [
     { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", title: "音频模型", defaultLabel: "默认音频", optionsLabel: "可选音频模型", hint: "用于语音、旁白和音频生成。" },
 ];
 
-const apiFormatOptions: Array<{ label: string; options: Array<{ label: string; value: ApiCallFormat }> }> = [
-    {
-        label: "官方接口",
-        options: [
-            { label: "OpenAI", value: "openai" },
-            { label: "Gemini", value: "gemini" },
-            { label: "Volcengine Seedance", value: "volcengine" },
-        ],
-    },
-    {
-        label: "第三方接口",
-        options: [
-            { label: "Cai API", value: "openai-json" },
-            { label: "NewToken API", value: "newtoken" },
-            { label: "Duomi API", value: "duomiapi" },
-        ],
-    },
+const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
+    { label: "OpenAI", value: "openai" },
+    { label: "Gemini", value: "gemini" },
+    { label: "Volcengine Seedance", value: "volcengine" },
+    { label: "Cai", value: "openai-json" },
+    { label: "NewToken", value: "newtoken" },
+    { label: "Duomi", value: "duomiapi" },
 ];
 
 const newTokenVideoModels = ["video-standard-720p", "video-pro-720p", "video-fast-720p", "sora-2", "sora-vip3-pro-720p", "sora-vip3-pro-1080p", "veo-omni-flash", "veo-omni-flash-video-edit", "veo-3-1"];
@@ -166,7 +156,7 @@ export function AppConfigModal() {
     };
 
     const saveLocalChannelToCloud = async (channel: ModelChannel) => {
-        if (!channel.apiKey.trim()) return message.error("该本地渠道没有 API Key");
+        if (!channel.apiKey.trim()) return message.error("该本地渠道没有 Key");
         setAccountLoading(true);
         try {
             await createCloudChannel({ name: channel.name, baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat, models: channel.models });
@@ -181,7 +171,7 @@ export function AppConfigModal() {
 
     const copyCloudChannelModels = (channel: CloudModelChannel) => {
         navigator.clipboard?.writeText(channel.models.join("\n")).catch(() => {});
-        message.success("已复制云端渠道模型名；云端 API Key 不会下发到浏览器");
+        message.success("已复制云端渠道模型名；云端 Key 不会下发到浏览器");
     };
 
     const updateChannels = (channels: ModelChannel[]) => {
@@ -214,11 +204,11 @@ export function AppConfigModal() {
     const refreshChannelModels = async (channel: ModelChannel) => {
         if (channel.apiFormat === "duomiapi") {
             updateChannel(channel.id, { models: duomiModels });
-            message.success("已恢复 Duomi API 已适配模型");
+            message.success("已恢复 Duomi 已适配模型");
             return;
         }
         if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
-            message.error("请先填写该渠道的 Base URL 和 API Key");
+            message.error("请先填写该渠道的 Base URL 和 Key");
             return;
         }
         setLoadingChannelId(channel.id);
@@ -239,10 +229,10 @@ export function AppConfigModal() {
         if (!runnable.length) {
             if (duomiChannels.length) {
                 updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : channel)));
-                message.success("已恢复 Duomi API 已适配模型");
+                message.success("已恢复 Duomi 已适配模型");
                 return;
             }
-            message.error("请先填写至少一个可拉取渠道的 Base URL 和 API Key");
+            message.error("请先填写至少一个可拉取渠道的 Base URL 和 Key");
             return;
         }
         setLoadingChannelId("all");
@@ -348,7 +338,7 @@ export function AppConfigModal() {
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                                         <div>
                                             <div className="text-sm font-semibold">{accountUser ? `已登录：${accountUser.email}` : "登录后可保存云端个人渠道"}</div>
-                                            <div className="mt-1 text-xs leading-5 text-stone-500">未登录时继续使用本地 API Key；登录后可把个人渠道加密保存到服务端，后续用于多端共享和异步任务。</div>
+                                            <div className="mt-1 text-xs leading-5 text-stone-500">未登录时继续使用本地 Key；登录后可把个人渠道加密保存到服务端，后续用于多端共享和异步任务。</div>
                                         </div>
                                         {accountUser ? (
                                             <Button loading={accountLoading} onClick={() => void logout()}>
@@ -462,7 +452,7 @@ export function AppConfigModal() {
                                                 <Form.Item label="Base URL" className="mb-0">
                                                     <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
                                                 </Form.Item>
-                                                <Form.Item label="API Key" className="mb-0">
+                                                <Form.Item label="Key" className="mb-0">
                                                     <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
                                                 </Form.Item>
                                                 <Form.Item label="模型列表" className="mb-0 md:col-span-2">
@@ -483,7 +473,7 @@ export function AppConfigModal() {
                                                     {channel.apiFormat === "duomiapi" ? (
                                                         <div className="mb-2 flex justify-end">
                                                             <Button size="small" onClick={() => updateChannel(channel.id, { models: duomiModels })}>
-                                                                恢复 Duomi API 已适配模型
+                                                                恢复 Duomi 已适配模型
                                                             </Button>
                                                         </div>
                                                     ) : null}
@@ -509,7 +499,7 @@ export function AppConfigModal() {
                                         </div>
                                         <div className="rounded-md bg-stone-100 px-2 py-1 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-400">渠道模型 {config.models.length} 个</div>
                                     </div>
-                                    {config.channels.some((channel) => channel.apiFormat === "duomiapi") ? <div className="mt-2 text-xs leading-5 text-stone-500">Duomi API 暂使用已适配模型列表，不需要拉取模型；如果可选项缺失，可回到“渠道”恢复已适配模型。</div> : null}
+                                    {config.channels.some((channel) => channel.apiFormat === "duomiapi") ? <div className="mt-2 text-xs leading-5 text-stone-500">Duomi 暂使用已适配模型列表，不需要拉取模型；如果可选项缺失，可回到“渠道”恢复已适配模型。</div> : null}
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => (
@@ -605,7 +595,7 @@ export function AppConfigModal() {
                                                 <Cloud className="size-4" />
                                                 WebDAV 同步
                                             </div>
-                                            <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI API Key；服务不支持 CORS 时可走 Next.js 转发。</div>
+                                            <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI Key；服务不支持 CORS 时可走 Next.js 转发。</div>
                                         </div>
                                         <div className="text-xs text-stone-500">{webdav.lastSyncedAt ? `上次同步 ${formatWebdavTime(webdav.lastSyncedAt)}` : "尚未同步"}</div>
                                     </div>
@@ -700,9 +690,9 @@ function uniqueModels(models: string[]) {
 function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "volcengine") return "Volcengine Seedance";
-    if (apiFormat === "openai-json") return "Cai API";
-    if (apiFormat === "newtoken") return "NewToken API";
-    if (apiFormat === "duomiapi") return "Duomi API";
+    if (apiFormat === "openai-json") return "Cai";
+    if (apiFormat === "newtoken") return "NewToken";
+    if (apiFormat === "duomiapi") return "Duomi";
     return "OpenAI";
 }
 
