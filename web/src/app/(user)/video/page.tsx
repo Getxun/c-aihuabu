@@ -763,10 +763,15 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
                         {formatDuration(log.durationMs)}
                     </Tag>
+                    <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.time || formatLogTime(log.createdAt)}</Tag>
                 </div>
             </div>
         </button>
     );
+}
+
+function formatLogTime(createdAt: number) {
+    return new Date(createdAt || Date.now()).toLocaleString("zh-CN", { hour12: false });
 }
 
 async function readStoredLogs() {
