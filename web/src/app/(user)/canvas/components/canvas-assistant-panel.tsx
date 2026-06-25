@@ -778,7 +778,7 @@ function OnlineAgentSetupView({ theme, activeModel, onOpenConfig }: { theme: (ty
                 <div>
                     <div className="text-base font-semibold leading-6">连接配置</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                        网站 Agent 直接使用当前网页配置的文本模型和 API。
+                        网站 Agent 直接使用当前网页配置的文本模型。
                     </div>
                 </div>
                 <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>

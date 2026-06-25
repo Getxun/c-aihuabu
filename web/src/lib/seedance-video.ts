@@ -169,9 +169,21 @@ export function buildSeedancePromptText(prompt: string, images: ReferenceImage[]
         ...videos.map((_, index) => seedanceReferenceLabel("video", index)),
         ...audios.map((_, index) => seedanceReferenceLabel("audio", index)),
     ];
-    const text = prompt.trim();
+    const text = normalizeReferenceLabelText(prompt, labels);
     if (!labels.length) return text;
     return `参考素材编号：${labels.join("、")}。请按这些编号理解提示词中的图片、视频和音频引用。\n\n${text}`;
+}
+
+function normalizeReferenceLabelText(prompt: string, labels: string[]) {
+    let text = prompt.trim();
+    for (const label of labels) {
+        text = text.replace(new RegExp(`@${escapeRegExp(label)}\\b`, "g"), label);
+    }
+    return text;
+}
+
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const baseUrl = (body.baseUrl || "").trim();
     const apiKey = body.apiKey || "";
     if (!baseUrl) return fail("请填写 Base URL");
-    if (!apiKey) return fail("请填写 API Key");
+    if (!apiKey) return fail("请填写 Key");
 
     const now = new Date().toISOString();
     const db = await readAccountDb();

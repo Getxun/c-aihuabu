@@ -101,9 +101,10 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const requestPrompt = buildSeedancePromptText(prompt, references, [], []);
     const body = new FormData();
     body.append("model", modelOptionName(model));
-    body.append("prompt", prompt);
+    body.append("prompt", requestPrompt);
     body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
     if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
@@ -124,8 +125,9 @@ async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: 
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     assertGrokImagineVideo15Reference(model, imageUrls);
-    const payload = buildNewTokenVideoPayload(config, model, prompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    const payload = buildNewTokenVideoPayload(config, model, requestPrompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -142,9 +144,10 @@ async function createDuomiVideoTask(config: AiConfig, model: string, prompt: str
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     assertGrokImagineVideo15Reference(modelName, imageUrls);
     const isGrok = modelName.toLowerCase().includes("grok");
-    const payload = isGrok ? buildDuomiGrokPayload(config, modelName, prompt, imageUrls) : buildDuomiSeedancePayload(config, modelName, prompt, imageUrls, videoUrls, audioUrls);
+    const payload = isGrok ? buildDuomiGrokPayload(config, modelName, requestPrompt, imageUrls) : buildDuomiSeedancePayload(config, modelName, requestPrompt, imageUrls, videoUrls, audioUrls);
     const path = isGrok ? "/videos/generations" : "/contents/generations/tasks";
 
     try {
@@ -161,11 +164,12 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
     const ratio = normalizeSeedanceRatio(config.size);
     const payload: Record<string, any> = {
         model: modelOptionName(model),
-        prompt,
+        prompt: requestPrompt,
         duration: normalizeCaiDuration(config.videoSeconds),
         metadata: {
             resolution: normalizeCaiResolution(config.vquality),
@@ -190,6 +194,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
     
     const duration = normalizeSeedanceDuration(config.videoSeconds);
@@ -199,7 +204,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
     
     const payload: Record<string, any> = {
         model: modelOptionName(model),
-        prompt: prompt,
+        prompt: requestPrompt,
         duration: duration === -1 ? 10 : duration,
         size: ratio === "adaptive" ? "16:9" : ratio,
     };
@@ -325,7 +330,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     }
     assertSeedanceVideoReferences(videoReferences);
     assertSeedanceAudioReferences(audioReferences);
-    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
+    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences, options);
     if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
     const payload = {
         model: modelOptionName(model),
@@ -387,46 +392,52 @@ function seedanceApiUrl(config: AiConfig, taskId?: string) {
     return buildAiApiUrl(config.baseUrl, `/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`);
 }
 
-async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions) {
     const content: Array<Record<string, unknown>> = [];
     const text = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     if (text) content.push({ type: "text", text });
     for (const image of references.slice(0, SEEDANCE_REFERENCE_LIMITS.images)) {
-        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
+        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(image, options) }, role: "reference_image" });
     }
     for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
-        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
+        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video, options) }, role: "reference_video" });
     }
     for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
-        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
+        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio, options) }, role: "reference_audio" });
     }
     return content;
 }
 
-async function resolveSeedanceImageUrl(config: AiConfig, image: ReferenceImage) {
+async function resolveSeedanceImageUrl(image: ReferenceImage, options?: RequestOptions) {
     const directUrl = image.url || image.dataUrl;
-    if (isPublicMediaUrl(directUrl) || directUrl.startsWith("asset://")) return directUrl;
+    if (directUrl.startsWith("asset://")) return directUrl;
+    if (isPublicMediaUrl(directUrl)) return assertPublicReferenceReachable(directUrl, image.type || "image/*", "参考图", options);
     const dataUrl = await imageToDataUrl(image);
     if (!dataUrl) throw new Error("参考图读取失败，请换一张图片或重新上传");
-    return dataUrl;
+    const file = await dataUrlToFile({ ...image, dataUrl });
+    return uploadCaiReferenceFile(file, options);
 }
 
-async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
-    if (isPublicMediaUrl(video.url) || video.url.startsWith("asset://")) return video.url;
+async function resolveSeedanceVideoUrl(video: ReferenceVideo, options?: RequestOptions) {
+    if (video.url.startsWith("asset://")) return video.url;
+    if (isPublicMediaUrl(video.url)) return assertPublicReferenceReachable(video.url, video.type || "video/*", "参考视频", options);
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
     if (!blob) throw new Error("参考视频必须是公网 URL、素材 ID，或本地已保存的视频");
-    return blobToDataUrl(blob);
+    const file = new File([blob], video.name || "参考视频.mp4", { type: video.type || blob.type || "video/mp4" });
+    return uploadCaiReferenceFile(file, options);
 }
 
-async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
-    if (isPublicMediaUrl(audio.url) || audio.url.startsWith("asset://")) return audio.url;
+async function resolveSeedanceAudioUrl(audio: ReferenceAudio, options?: RequestOptions) {
+    if (audio.url.startsWith("asset://")) return audio.url;
+    if (isPublicMediaUrl(audio.url)) return assertPublicReferenceReachable(audio.url, audio.type || "audio/*", "参考音频", options);
     let blob: Blob | null = null;
     if (audio.storageKey) blob = await getMediaBlob(audio.storageKey);
     if (!blob && audio.url?.startsWith("blob:")) blob = await (await fetch(audio.url)).blob();
     if (!blob) throw new Error("参考音频必须是公网 URL、素材 ID，或本地已保存的音频");
-    return blobToDataUrl(blob);
+    const file = new File([blob], audio.name || "参考音频.mp3", { type: audio.type || blob.type || "audio/mpeg" });
+    return uploadCaiReferenceFile(file, options);
 }
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
@@ -443,7 +454,7 @@ async function videoResultFromUrl(url: string, options?: RequestOptions): Promis
 function assertVideoConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置视频模型");
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
-    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    if (!config.apiKey.trim()) throw new Error("请先配置 Key");
     if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持视频生成，请使用 OpenAI 格式渠道");
 }
 
@@ -553,18 +564,10 @@ function normalizeNewTokenAspectRatio(value: string) {
 }
 
 function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[]) {
-    const text = [
-        prompt,
-        imageUrls.length ? `参考图片：${imageUrls.map((_, index) => `图片${index + 1}`).join("、")}` : "",
-        videoUrls.length ? `参考视频：${videoUrls.map((_, index) => `视频${index + 1}`).join("、")}` : "",
-        audioUrls.length ? `参考音频：${audioUrls.map((_, index) => `音频${index + 1}`).join("、")}` : "",
-    ]
-        .filter(Boolean)
-        .join("\n");
     return {
         model,
         content: [
-            { type: "text", text },
+            { type: "text", text: prompt },
             ...imageUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.images).map((url) => ({ type: "image_url", image_url: { url }, role: "reference_image" })),
             ...videoUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.videos).map((url) => ({ type: "video_url", video_url: { url }, role: "reference_video" })),
             ...audioUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.audios).map((url) => ({ type: "audio_url", audio_url: { url }, role: "reference_audio" })),
@@ -661,15 +664,15 @@ function readAxiosError(error: unknown, fallback: string) {
 }
 
 function statusMessage(status: number | undefined, fallback: string) {
-    if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
+    if (status === 401 || status === 403) return "鉴权失败，请检查 Key、套餐权限或模型权限";
     if (status === 408) return `${fallback}（408）：Cai 接口请求超时，请确认参考图片/视频/音频是公网 URL，不能使用本地 blob、dataURL 或浏览器本地素材`;
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
     return status ? `${fallback}（${status}）` : fallback;
 }
 
-function resolveCaiPublicUrl(value: string | undefined, label: string) {
+async function resolveCaiPublicUrl(value: string | undefined, label: string, mimeType: string, options?: RequestOptions) {
     const url = String(value || "").trim();
-    if (isCaiReachableUrl(url)) return url;
+    if (isCaiReachableUrl(url)) return assertPublicReferenceReachable(url, mimeType, label, options);
     if (/^https?:\/\//i.test(url)) throw new Error(`${label}地址不是上游可访问的公网 HTTPS URL，请配置 C_AI_PUBLIC_BASE_URL 为当前站点的公网 HTTPS 地址。`);
     throw new Error(`Cai 专用接口要求${label}必须是服务器可访问的公网 URL，当前本地素材不能直接提交。请先上传到对象存储或使用公网链接。`);
 }
@@ -681,11 +684,11 @@ async function resolveCaiImageUrl(image: ReferenceImage, options?: RequestOption
 
 async function resolveCaiMediaUrl(media: ReferenceVideo | ReferenceAudio, label: string, options?: RequestOptions) {
     const directUrl = String(media.url || "").trim();
-    if (isCaiReachableUrl(directUrl)) return directUrl;
+    if (isCaiReachableUrl(directUrl)) return assertPublicReferenceReachable(directUrl, media.type || (label.includes("音频") ? "audio/*" : "video/*"), label, options);
     let blob: Blob | null = null;
     if (media.storageKey) blob = await getMediaBlob(media.storageKey);
     if (!blob && directUrl.startsWith("blob:")) blob = await (await fetch(directUrl)).blob();
-    if (!blob) return resolveCaiPublicUrl(directUrl, label);
+    if (!blob) return resolveCaiPublicUrl(directUrl, label, media.type || (label.includes("音频") ? "audio/*" : "video/*"), options);
     const file = new File([blob], media.name || `${label}.${media.type.includes("audio") ? "mp3" : "mp4"}`, { type: media.type || blob.type || "application/octet-stream" });
     return uploadCaiReferenceFile(file, options);
 }
@@ -697,11 +700,10 @@ async function uploadCaiReferenceFile(file: File, options?: RequestOptions) {
     const url = response.data?.data?.url;
     if (!url) throw new Error(response.data?.msg || "参考图片上传失败");
     if (!isCaiReachableUrl(url)) throw new Error("参考素材已上传到本地服务，但返回地址不是公网 HTTPS URL。请在 Docker/部署环境配置 C_AI_PUBLIC_BASE_URL=https://你的域名，并确保外网可访问。");
-    await assertUploadedReferenceReachable(url, file.type, options);
-    return url;
+    return assertPublicReferenceReachable(url, file.type, "参考素材", options);
 }
 
-async function assertUploadedReferenceReachable(url: string, mimeType: string, options?: RequestOptions) {
+async function assertPublicReferenceReachable(url: string, mimeType: string, label: string, options?: RequestOptions) {
     try {
         const response = await axios.head(url, { signal: options?.signal }).catch(async (error) => {
             if (axios.isCancel(error) || options?.signal?.aborted) throw error;
@@ -711,12 +713,13 @@ async function assertUploadedReferenceReachable(url: string, mimeType: string, o
         if (!response) return;
         const contentType = String(response.headers["content-type"] || "").toLowerCase();
         const contentLength = Number(response.headers["content-length"] || 0);
-        if (mimeType.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType || "empty"}`);
+        assertReferenceContentType(contentType, mimeType);
         if (contentLength <= 0) await probeUploadedReference(url, mimeType, options);
+        return url;
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         const reason = error instanceof Error ? error.message : "无法访问";
-        throw new Error(`参考素材公网地址自检失败：${reason}。请确认 ${url} 可在公网无登录访问，且反向代理没有拦截 HEAD/图片读取。`);
+        throw new Error(`${label}公网地址自检失败：${reason}。请确认 ${url} 可在公网无登录访问，且反向代理没有拦截 HEAD/GET Range 读取。`);
     }
 }
 
@@ -729,13 +732,21 @@ async function probeUploadedReference(url: string, mimeType: string, options?: R
     });
     if (!response.ok && response.status !== 206) throw new Error(`GET=${response.status}`);
     const contentType = response.headers.get("content-type")?.toLowerCase() || "";
-    if (mimeType.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType || "empty"}`);
+    assertReferenceContentType(contentType, mimeType);
     const reader = response.body?.getReader();
     if (!reader) return;
     const result = await reader.read();
     await reader.cancel().catch(() => undefined);
     if (!result.done && result.value?.byteLength) return;
     throw new Error("GET 内容为空");
+}
+
+function assertReferenceContentType(contentType: string, mimeType: string) {
+    if (!contentType) return;
+    const expected = mimeType.toLowerCase();
+    if (expected.startsWith("image/") && !contentType.startsWith("image/")) throw new Error(`Content-Type=${contentType}`);
+    if (expected.startsWith("video/") && !contentType.startsWith("video/")) throw new Error(`Content-Type=${contentType}`);
+    if (expected.startsWith("audio/") && !contentType.startsWith("audio/")) throw new Error(`Content-Type=${contentType}`);
 }
 
 function isCaiReachableUrl(value: string) {
@@ -874,14 +885,5 @@ function delay(ms: number, signal?: AbortSignal) {
             },
             { once: true },
         );
-    });
-}
-
-function blobToDataUrl(blob: Blob) {
-    return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("读取本地素材失败"));
-        reader.readAsDataURL(blob);
     });
 }
