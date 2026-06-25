@@ -954,6 +954,11 @@ function InfiniteCanvasPage() {
             nodesRef.current.forEach((node) => {
                 if (ids.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => allIds.add(childId));
             });
+            generationRequestsRef.current.forEach((request) => {
+                if (!allIds.has(request.targetNodeId) && !allIds.has(request.originNodeId) && !allIds.has(request.runningNodeId)) return;
+                request.controller.abort();
+                generationRequestsRef.current.delete(request.targetNodeId);
+            });
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {

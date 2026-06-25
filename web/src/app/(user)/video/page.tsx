@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, CircleStop, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Drawer, Empty, message, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -79,6 +79,9 @@ export default function VideoPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const promptInputRef = useRef<HTMLTextAreaElement>(null);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const pollAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+    const stoppedLogIdsRef = useRef<Set<string>>(new Set());
+    const deletedLogIdsRef = useRef<Set<string>>(new Set());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -292,13 +295,46 @@ export default function VideoPage() {
         setPreviewLog(null);
     };
 
+    const stopLogPolling = (id: string) => {
+        stoppedLogIdsRef.current.add(id);
+        pollAbortControllersRef.current.get(id)?.abort();
+    };
+
+    const stopSelectedLogs = () => {
+        const stoppedLogs = logs.filter((log) => selectedLogIds.includes(log.id) && log.status === "生成中");
+        if (!stoppedLogs.length) return;
+        stoppedLogs.forEach((log) => stopLogPolling(log.id));
+        void Promise.all(
+            stoppedLogs.map((log) =>
+                logStore.setItem(
+                    log.id,
+                    serializeLog({
+                        ...log,
+                        status: "失败",
+                        durationMs: Date.now() - log.createdAt,
+                        error: "已停止本地轮询",
+                    }),
+                ),
+            ),
+        ).then(async () => {
+            await refreshLogs();
+            if (previewLog && stoppedLogs.some((log) => log.id === previewLog.id)) setResults([{ id: previewLog.id, status: "failed", error: "已停止本地轮询" }]);
+            message.success(`已停止 ${stoppedLogs.length} 条生成任务`);
+        });
+    };
+
     const deleteSelectedLogs = () => {
+        const deletingIds = [...selectedLogIds];
+        deletingIds.forEach((id) => {
+            deletedLogIdsRef.current.add(id);
+            stopLogPolling(id);
+        });
         const mediaKeys = logs
-            .filter((log) => selectedLogIds.includes(log.id))
+            .filter((log) => deletingIds.includes(log.id))
             .flatMap((log) => [log.video?.storageKey, log.video?.thumbnailStorageKey])
             .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
+        void Promise.all([deleteStoredMedia(mediaKeys), ...deletingIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        if (previewLog && deletingIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
         }
@@ -320,12 +356,14 @@ export default function VideoPage() {
 
     const resumePendingLogs = (items: GenerationLog[]) => {
         for (const log of items) {
-            if (log.status === "生成中" && log.task) void pollGenerationLog(log);
+            if (log.status === "生成中" && log.task && !deletedLogIdsRef.current.has(log.id) && !stoppedLogIdsRef.current.has(log.id)) void pollGenerationLog(log);
         }
     };
 
     const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig) => {
-        if (!log.task || activeLogIdsRef.current.has(log.id)) return;
+        if (!log.task || activeLogIdsRef.current.has(log.id) || deletedLogIdsRef.current.has(log.id) || stoppedLogIdsRef.current.has(log.id)) return;
+        const abortController = new AbortController();
+        pollAbortControllersRef.current.set(log.id, abortController);
         activeLogIdsRef.current.add(log.id);
         setRunningCount((value) => value + 1);
         setStartedAt((value) => value || performance.now());
@@ -337,11 +375,15 @@ export default function VideoPage() {
         const maxAttempts = Math.ceil(VIDEO_POLL_TIMEOUT_MS / baseDelay);
         try {
             for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                if (deletedLogIdsRef.current.has(log.id)) return;
+                if (stoppedLogIdsRef.current.has(log.id) || abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 let state: Awaited<ReturnType<typeof pollVideoGenerationTask>>;
                 try {
-                    state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+                    state = await pollVideoGenerationTask(configOverride || taskConfig, log.task, { signal: abortController.signal });
                     consecutiveErrors = 0;
                 } catch (error) {
+                    if (deletedLogIdsRef.current.has(log.id)) return;
+                    if (stoppedLogIdsRef.current.has(log.id) || abortController.signal.aborted) throw error;
                     consecutiveErrors += 1;
                     const errorMessage = error instanceof Error ? error.message : "网络异常，任务查询失败";
                     latestLog = { ...latestLog, status: "生成中", durationMs: Date.now() - latestLog.createdAt, error: `轮询暂时中断：${errorMessage}` };
@@ -351,9 +393,10 @@ export default function VideoPage() {
                         message.warning("网络中断，视频任务已保留为生成中，稍后打开页面会继续查询");
                         return;
                     }
-                    await delay(Math.min(baseDelay * consecutiveErrors, 30000));
+                    await delay(Math.min(baseDelay * consecutiveErrors, 30000), abortController.signal);
                     continue;
                 }
+                if (deletedLogIdsRef.current.has(log.id)) return;
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
                     const thumbnail = await createStoredVideoThumbnail(stored.url);
@@ -382,14 +425,18 @@ export default function VideoPage() {
                     message.warning("视频任务耗时较长，已保留为生成中");
                     return;
                 }
-                await delay(baseDelay);
+                await delay(baseDelay, abortController.signal);
             }
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "生成失败";
+            if (deletedLogIdsRef.current.has(log.id)) return;
+            const stopped = stoppedLogIdsRef.current.has(log.id) || abortController.signal.aborted;
+            const errorMessage = stopped ? "已停止本地轮询" : error instanceof Error ? error.message : "生成失败";
             setResults([{ id: latestLog.id, status: "failed", error: errorMessage }]);
             await saveLog({ ...latestLog, status: "失败", durationMs: Date.now() - latestLog.createdAt, error: errorMessage });
-            message.error(errorMessage);
+            if (!stopped) message.error(errorMessage);
         } finally {
+            pollAbortControllersRef.current.delete(log.id);
+            stoppedLogIdsRef.current.delete(log.id);
             activeLogIdsRef.current.delete(log.id);
             setRunningCount((value) => Math.max(0, value - 1));
             if (!activeLogIdsRef.current.size) {
@@ -419,7 +466,7 @@ export default function VideoPage() {
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
             <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
                 <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
-                    <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+                    <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onStopSelected={stopSelectedLogs} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
                 </aside>
 
                 <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
@@ -600,7 +647,7 @@ export default function VideoPage() {
                 }}
             />
             <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+                <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onStopSelected={stopSelectedLogs} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
             </Drawer>
             <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
@@ -610,7 +657,7 @@ export default function VideoPage() {
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除选中的 {selectedLogIds.length} 条生成记录吗？
+                确定删除选中的 {selectedLogIds.length} 条生成记录吗？生成中的记录会先停止本地轮询再删除。
             </Modal>
         </div>
     );
@@ -693,6 +740,7 @@ function LogPanel({
     activeLogId,
     onSelectedLogIdsChange,
     onCreateSession,
+    onStopSelected,
     onDeleteSelected,
     onPreviewLog,
 }: {
@@ -701,10 +749,12 @@ function LogPanel({
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
     onCreateSession: () => void;
+    onStopSelected: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
+    const hasSelectedRunning = logs.some((log) => selectedLogIds.includes(log.id) && log.status === "生成中");
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
     return (
@@ -719,6 +769,9 @@ function LogPanel({
                 </Button>
                 <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? "取消" : "全选"}
+                </Button>
+                <Button size="small" icon={<CircleStop className="size-3.5" />} disabled={!hasSelectedRunning} onClick={onStopSelected}>
+                    停止
                 </Button>
                 <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                     删除
@@ -1047,6 +1100,20 @@ function normalizeResolution(value: string) {
     return normalizeVideoResolutionValue(value);
 }
 
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                window.clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
 }

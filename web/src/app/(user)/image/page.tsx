@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, CircleStop, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Drawer, Empty, Image, message, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -73,6 +73,9 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 export default function ImagePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const promptInputRef = useRef<HTMLTextAreaElement>(null);
+    const generationAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+    const stoppedLogIdsRef = useRef<Set<string>>(new Set());
+    const deletedLogIdsRef = useRef<Set<string>>(new Set());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -176,11 +179,13 @@ export default function ImagePage() {
             status: "生成中",
             images: [],
         });
+        generationAbortControllersRef.current.set(pendingLog.id, new AbortController());
         await saveLogAsync(pendingLog);
 
         const slotImages: Array<GeneratedImage | null> = Array.from({ length: generationCount }, () => null);
         const slotErrors: Array<string | null> = Array.from({ length: generationCount }, () => null);
         const updatePendingLog = async (status: GenerationLog["status"], error?: string) => {
+            if (deletedLogIdsRef.current.has(pendingLog.id)) return;
             const images = slotImages.filter((image): image is GeneratedImage => Boolean(image));
             await saveLogAsync({
                 ...pendingLog,
@@ -195,9 +200,11 @@ export default function ImagePage() {
         };
 
         const tasks = Array.from({ length: generationCount }, (_, index) =>
-            runGenerationSlot(index, snapshot)
+            runGenerationSlot(index, snapshot, pendingLog.id)
                 .then(async (image) => {
+                    if (deletedLogIdsRef.current.has(pendingLog.id) || stoppedLogIdsRef.current.has(pendingLog.id)) return image;
                     const stored = await uploadImage(image.dataUrl);
+                    if (deletedLogIdsRef.current.has(pendingLog.id) || stoppedLogIdsRef.current.has(pendingLog.id)) return image;
                     const storedImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                     slotImages[index] = storedImage;
                     await updatePendingLog("生成中");
@@ -215,11 +222,14 @@ export default function ImagePage() {
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
+        const stopped = stoppedLogIdsRef.current.has(pendingLog.id) || generationAbortControllersRef.current.get(pendingLog.id)?.signal.aborted;
 
         try {
-            await updatePendingLog(successCount ? "成功" : "失败", failed?.reason instanceof Error ? failed.reason.message : undefined);
-            successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
+            if (!deletedLogIdsRef.current.has(pendingLog.id)) await updatePendingLog(successCount && !stopped ? "成功" : "失败", stopped ? "已停止本地生成" : failed?.reason instanceof Error ? failed.reason.message : undefined);
+            if (!stopped) successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
+            generationAbortControllersRef.current.delete(pendingLog.id);
+            stoppedLogIdsRef.current.delete(pendingLog.id);
             setRunningCount((value) => Math.max(0, value - 1));
         }
     };
@@ -289,10 +299,43 @@ export default function ImagePage() {
         }, 0);
     };
 
+    const stopLogGeneration = (id: string) => {
+        stoppedLogIdsRef.current.add(id);
+        generationAbortControllersRef.current.get(id)?.abort();
+    };
+
+    const stopSelectedLogs = () => {
+        const stoppedLogs = logs.filter((log) => selectedLogIds.includes(log.id) && log.status === "生成中");
+        if (!stoppedLogs.length) return;
+        stoppedLogs.forEach((log) => stopLogGeneration(log.id));
+        void Promise.all(
+            stoppedLogs.map((log) =>
+                logStore.setItem(
+                    log.id,
+                    serializeLog({
+                        ...log,
+                        status: "失败",
+                        durationMs: Date.now() - log.createdAt,
+                        error: "已停止本地生成",
+                    }),
+                ),
+            ),
+        ).then(async () => {
+            await refreshLogs();
+            if (previewLog && stoppedLogs.some((log) => log.id === previewLog.id)) setResults([{ id: previewLog.id, status: "failed", error: "已停止本地生成" }]);
+            message.success(`已停止 ${stoppedLogs.length} 条生成记录`);
+        });
+    };
+
     const deleteSelectedLogs = () => {
-        const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
+        const deletingIds = [...selectedLogIds];
+        deletingIds.forEach((id) => {
+            deletedLogIdsRef.current.add(id);
+            stopLogGeneration(id);
+        });
+        const imageKeys = logs.filter((log) => deletingIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
+        void Promise.all([deleteStoredImages(imageKeys), ...deletingIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        if (previewLog && deletingIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
         }
@@ -301,6 +344,7 @@ export default function ImagePage() {
     };
 
     const saveLogAsync = async (log: GenerationLog) => {
+        if (deletedLogIdsRef.current.has(log.id)) return;
         await logStore.setItem(log.id, serializeLog(log));
         await refreshLogs();
     };
@@ -333,18 +377,22 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }, logId?: string) => {
         const itemStartedAt = performance.now();
+        const controller = logId ? generationAbortControllersRef.current.get(logId) : undefined;
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            if (controller?.signal.aborted || (logId && stoppedLogIdsRef.current.has(logId))) throw new DOMException("Aborted", "AbortError");
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, { signal: controller?.signal }) : await requestGeneration(snapshot.config, snapshot.text, { signal: controller?.signal });
+            if (controller?.signal.aborted || (logId && (deletedLogIdsRef.current.has(logId) || stoppedLogIdsRef.current.has(logId)))) throw new DOMException("Aborted", "AbortError");
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
             const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
+            if (!logId || !deletedLogIdsRef.current.has(logId)) setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            const stopped = logId && (stoppedLogIdsRef.current.has(logId) || generationAbortControllersRef.current.get(logId)?.signal.aborted);
+            if (!logId || !deletedLogIdsRef.current.has(logId)) setResults((value) => updateResultAt(value, index, { status: "failed", error: stopped ? "已停止本地生成" : error instanceof Error ? error.message : "生成失败" }));
             throw error;
         }
     };
@@ -367,6 +415,7 @@ export default function ImagePage() {
                         activeLogId={previewLog?.id}
                         onSelectedLogIdsChange={setSelectedLogIds}
                         onCreateSession={createSession}
+                        onStopSelected={stopSelectedLogs}
                         onDeleteSelected={() => setDeleteConfirmOpen(true)}
                         onPreviewLog={(log) => void previewGenerationLog(log)}
                     />
@@ -534,6 +583,7 @@ export default function ImagePage() {
                     activeLogId={previewLog?.id}
                     onSelectedLogIdsChange={setSelectedLogIds}
                     onCreateSession={createSession}
+                    onStopSelected={stopSelectedLogs}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
@@ -546,7 +596,7 @@ export default function ImagePage() {
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除选中的 {selectedLogIds.length} 条生成记录吗？
+                确定删除选中的 {selectedLogIds.length} 条生成记录吗？生成中的记录会先停止本地生成再删除。
             </Modal>
         </div>
     );
@@ -673,6 +723,7 @@ function LogPanel({
     activeLogId,
     onSelectedLogIdsChange,
     onCreateSession,
+    onStopSelected,
     onDeleteSelected,
     onPreviewLog,
 }: {
@@ -681,10 +732,12 @@ function LogPanel({
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
     onCreateSession: () => void;
+    onStopSelected: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
+    const hasSelectedRunning = logs.some((log) => selectedLogIds.includes(log.id) && log.status === "生成中");
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
     return (
@@ -701,6 +754,9 @@ function LogPanel({
                 </Button>
                 <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? "取消" : "全选"}
+                </Button>
+                <Button size="small" icon={<CircleStop className="size-3.5" />} disabled={!hasSelectedRunning} onClick={onStopSelected}>
+                    停止
                 </Button>
                 <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                     删除
