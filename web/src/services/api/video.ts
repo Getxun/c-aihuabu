@@ -441,14 +441,8 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio, options?: RequestO
 }
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
-    try {
-        const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
-        await assertVideoBlob(response.data);
-        return { blob: response.data };
-    } catch (error) {
-        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-        return { url, mimeType: "video/mp4" };
-    }
+    if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    return { url, mimeType: "video/mp4" };
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {
