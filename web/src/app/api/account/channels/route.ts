@@ -104,7 +104,7 @@ function publicChannel(channel: CloudChannel) {
 }
 
 function normalizeApiFormat(value: unknown): ApiCallFormat {
-    if (value === "gemini" || value === "volcengine" || value === "openai-json" || value === "newtoken" || value === "duomiapi") return value;
+    if (value === "gemini" || value === "volcengine" || value === "openai-json" || value === "newtoken" || value === "duomiapi" || value === "lingdongapi") return value;
     return "openai";
 }
 

@@ -44,6 +44,7 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Cai", value: "openai-json" },
     { label: "NewToken", value: "newtoken" },
     { label: "Duomi", value: "duomiapi" },
+    { label: "Lingdong", value: "lingdongapi" },
 ];
 
 const newTokenVideoModels = ["video-standard-720p", "video-pro-720p", "video-fast-720p", "sora-2", "sora-vip3-pro-720p", "sora-vip3-pro-1080p", "veo-omni-flash", "veo-omni-flash-video-edit", "veo-3-1"];
@@ -53,6 +54,7 @@ const duomiModels = [
     "grok-video-1.5",
 ];
 const caiVideoModels = ["videos", "videos_stable", "happyhorse", "grok-imagine-video"];
+const lingdongModels = ["gpt-image-2", "sora-2", "sd-2-1", "sd-2-2", "sd-2-3", "sd-2-4", "sd-2-7", "sd-2-11", "sd-2-17"];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
 const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
@@ -192,7 +194,7 @@ export function AppConfigModal() {
 
     const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
         const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        const models = apiFormat === "duomiapi" ? duomiModels : !channel.models.length && apiFormat === "newtoken" ? newTokenVideoModels : !channel.models.length && apiFormat === "openai-json" ? caiVideoModels : channel.models;
+        const models = apiFormat === "duomiapi" ? duomiModels : apiFormat === "lingdongapi" ? lingdongModels : !channel.models.length && apiFormat === "newtoken" ? newTokenVideoModels : !channel.models.length && apiFormat === "openai-json" ? caiVideoModels : channel.models;
         updateChannel(channel.id, { apiFormat, baseUrl, models });
     };
 
@@ -209,9 +211,9 @@ export function AppConfigModal() {
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
-        if (channel.apiFormat === "duomiapi") {
-            updateChannel(channel.id, { models: duomiModels });
-            message.success("已恢复 Duomi 已适配模型");
+        if (channel.apiFormat === "duomiapi" || channel.apiFormat === "lingdongapi") {
+            updateChannel(channel.id, { models: channel.apiFormat === "lingdongapi" ? lingdongModels : duomiModels });
+            message.success(channel.apiFormat === "lingdongapi" ? "已恢复 Lingdong 已适配模型" : "已恢复 Duomi 已适配模型");
             return;
         }
         if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
@@ -231,12 +233,12 @@ export function AppConfigModal() {
     };
 
     const refreshAllModels = async () => {
-        const runnable = config.channels.filter((channel) => channel.apiFormat !== "duomiapi" && channel.baseUrl.trim() && channel.apiKey.trim());
-        const duomiChannels = config.channels.filter((channel) => channel.apiFormat === "duomiapi");
+        const builtinChannels = config.channels.filter((channel) => channel.apiFormat === "duomiapi" || channel.apiFormat === "lingdongapi");
+        const runnable = config.channels.filter((channel) => !builtinChannels.includes(channel) && channel.baseUrl.trim() && channel.apiKey.trim());
         if (!runnable.length) {
-            if (duomiChannels.length) {
-                updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : channel)));
-                message.success("已恢复 Duomi 已适配模型");
+            if (builtinChannels.length) {
+                updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : channel.apiFormat === "lingdongapi" ? { ...channel, models: lingdongModels } : channel)));
+                message.success("已恢复内置渠道已适配模型");
                 return;
             }
             message.error("请先填写至少一个可拉取渠道的 Base URL 和 Key");
@@ -246,7 +248,7 @@ export function AppConfigModal() {
         try {
             const entries = await Promise.all(runnable.map(async (channel) => [channel.id, await fetchChannelModels(channel)] as const));
             const modelMap = new Map(entries);
-            updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : modelMap.has(channel.id) ? { ...channel, models: modelMap.get(channel.id) || [] } : channel)));
+            updateChannels(config.channels.map((channel) => (channel.apiFormat === "duomiapi" ? { ...channel, models: duomiModels } : channel.apiFormat === "lingdongapi" ? { ...channel, models: lingdongModels } : modelMap.has(channel.id) ? { ...channel, models: modelMap.get(channel.id) || [] } : channel)));
             message.success("模型列表已更新");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取模型失败");
@@ -446,7 +448,7 @@ export function AppConfigModal() {
                                                             存云端
                                                         </Button>
                                                     ) : null}
-                                                    {channel.apiFormat !== "duomiapi" ? (
+                                                    {channel.apiFormat !== "duomiapi" && channel.apiFormat !== "lingdongapi" ? (
                                                         <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
                                                             拉取模型
                                                         </Button>
@@ -489,6 +491,13 @@ export function AppConfigModal() {
                                                             </Button>
                                                         </div>
                                                     ) : null}
+                                                    {channel.apiFormat === "lingdongapi" ? (
+                                                        <div className="mb-2 flex justify-end">
+                                                            <Button size="small" onClick={() => updateChannel(channel.id, { models: lingdongModels })}>
+                                                                恢复 Lingdong 已适配模型
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
                                                     <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
                                                 </Form.Item>
                                             </div>
@@ -511,7 +520,7 @@ export function AppConfigModal() {
                                         </div>
                                         <div className="rounded-md bg-stone-100 px-2 py-1 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-400">渠道模型 {config.models.length} 个</div>
                                     </div>
-                                    {config.channels.some((channel) => channel.apiFormat === "duomiapi") ? <div className="mt-2 text-xs leading-5 text-stone-500">Duomi 暂使用已适配模型列表，不需要拉取模型；如果可选项缺失，可回到“渠道”恢复已适配模型。</div> : null}
+                                    {config.channels.some((channel) => channel.apiFormat === "duomiapi" || channel.apiFormat === "lingdongapi") ? <div className="mt-2 text-xs leading-5 text-stone-500">Duomi / Lingdong 暂使用已适配模型列表，不需要拉取模型；如果可选项缺失，可回到“渠道”恢复已适配模型。</div> : null}
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => (
@@ -705,6 +714,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "openai-json") return "Cai";
     if (apiFormat === "newtoken") return "NewToken";
     if (apiFormat === "duomiapi") return "Duomi";
+    if (apiFormat === "lingdongapi") return "Lingdong";
     return "OpenAI";
 }
 

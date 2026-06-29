@@ -3974,7 +3974,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     };
     if (mode !== "video") return nextConfig;
     const seedance = isSeedanceVideoConfig(nextConfig);
-    const asyncJson = nextConfig.apiFormat === "newtoken" || nextConfig.apiFormat === "duomiapi";
+    const asyncJson = nextConfig.apiFormat === "newtoken" || nextConfig.apiFormat === "duomiapi" || nextConfig.apiFormat === "lingdongapi";
     return {
         ...nextConfig,
         videoModel: nextConfig.model,
@@ -3997,7 +3997,7 @@ function isSeedanceVideoConfig(config: AiConfig) {
 }
 
 function supportsRichVideoReferences(config: AiConfig) {
-    return config.apiFormat === "newtoken" || config.apiFormat === "duomiapi" || isSeedanceVideoConfig(config);
+    return config.apiFormat === "newtoken" || config.apiFormat === "duomiapi" || config.apiFormat === "lingdongapi" || isSeedanceVideoConfig(config);
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {

@@ -69,6 +69,9 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (requestConfig.apiFormat === "duomiapi") {
         return createDuomiVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
+    if (requestConfig.apiFormat === "lingdongapi") {
+        return createLingdongVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
     if (requestConfig.apiFormat === "newtoken") {
         return createNewTokenVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
@@ -88,6 +91,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (requestConfig.apiFormat === "duomiapi") return pollDuomiVideoTask(requestConfig, task, options);
+    if (requestConfig.apiFormat === "lingdongapi") return pollLingdongVideoTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "newtoken") return pollNewTokenVideoTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "volcengine") return pollSeedanceTask(requestConfig, task, options);
     if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
@@ -157,6 +161,30 @@ async function createDuomiVideoTask(config: AiConfig, model: string, prompt: str
         return { id: taskId, provider: "openai", model };
     } catch (error) {
         throw new Error(readAxiosError(error, "duomiapi 视频任务创建失败"));
+    }
+}
+
+async function createLingdongVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
+    const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
+    const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const payload: Record<string, any> = {
+        model: modelOptionName(model),
+        prompt: buildSeedancePromptText(prompt, references, videoReferences, audioReferences),
+        duration: normalizeLingdongDuration(config.videoSeconds, model),
+    };
+    appendLingdongSize(payload, config, model);
+    if (imageUrls.length) payload.images = imageUrls;
+    if (videoUrls.length) payload.videos = videoUrls;
+    if (audioUrls.length) payload.audios = audioUrls;
+
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/video/generations"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const taskId = readVideoTaskId(created);
+        if (!taskId) throw new Error("Lingdong 接口没有返回任务 ID");
+        return { id: taskId, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Lingdong 视频任务创建失败"));
     }
 }
 
@@ -240,7 +268,7 @@ async function pollNewTokenVideoTask(config: AiConfig, task: VideoGenerationTask
         const status = normalizeTaskStatus(video.status || video.state || video.task_status);
         if (status === "completed") {
             const directUrl = readVideoUrl(video);
-            if (directUrl) return { status: "completed", result: await videoResultFromUrl(directUrl, options) };
+            if (directUrl) return { status: "completed", result: await videoResultFromUrl(resolveProviderUrl(config, directUrl), options) };
             try {
                 const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
                 await assertVideoBlob(content.data);
@@ -271,6 +299,22 @@ async function pollDuomiVideoTask(config: AiConfig, task: VideoGenerationTask, o
         return { status: "pending" };
     } catch (error) {
         throw new Error(readAxiosError(error, "duomiapi 视频任务查询失败"));
+    }
+}
+
+async function pollLingdongVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/video/generations/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const status = normalizeTaskStatus(video.status || video.state || video.task_status);
+        const directUrl = readVideoUrl(video);
+        if (status === "completed" || directUrl) {
+            if (directUrl) return { status: "completed", result: await videoResultFromUrl(resolveProviderUrl(config, directUrl), options) };
+            return { status: "failed", error: "Lingdong 任务成功但没有返回视频 URL" };
+        }
+        if (status === "failed") return { status: "failed", error: video.message || video.error?.message || "Lingdong 视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Lingdong 视频任务查询失败"));
     }
 }
 
@@ -481,6 +525,25 @@ function normalizeCaiResolution(value: string) {
     return resolution.endsWith("P") ? resolution : `${resolution.replace(/p$/i, "")}P`;
 }
 
+function normalizeLingdongDuration(value: string, model: string) {
+    const duration = normalizeCaiDuration(value);
+    if (modelOptionName(model).toLowerCase() === "sora-2") {
+        if (duration <= 4) return 4;
+        if (duration <= 8) return 8;
+        return 12;
+    }
+    return Math.max(5, Math.min(15, duration));
+}
+
+function appendLingdongSize(payload: Record<string, any>, config: AiConfig, model: string) {
+    const ratio = normalizeNewTokenAspectRatio(config.size);
+    if (modelOptionName(model).toLowerCase() === "sora-2") {
+        payload.orientation = ratio === "9:16" || ratio === "3:4" ? "portrait" : ratio === "1:1" ? "square" : "landscape";
+        return;
+    }
+    payload.ratio = ratio;
+}
+
 function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
     const modelName = modelOptionName(model);
     const lowerModel = modelName.toLowerCase();
@@ -626,6 +689,8 @@ function readVideoUrl(payload: VideoResponse): string {
         payload.video_url,
         payload.image_url,
         payload.output_url,
+        payload.result_url,
+        payload.content_url,
         payload.content?.video_url,
         payload.video?.url,
         payload.output?.url,
@@ -635,6 +700,8 @@ function readVideoUrl(payload: VideoResponse): string {
         payload.data?.video_url,
         payload.data?.image_url,
         payload.data?.output_url,
+        payload.data?.result_url,
+        payload.data?.content_url,
         payload.data?.content?.video_url,
         payload.data?.videos?.[0]?.url,
         payload.data?.video?.url,
@@ -645,6 +712,13 @@ function readVideoUrl(payload: VideoResponse): string {
         Array.isArray(payload.data?.output) ? payload.data.output[0]?.url || payload.data.output[0]?.video_url : undefined,
     ];
     return String(candidates.find((url) => typeof url === "string" && url.trim()) || "").trim();
+}
+
+function resolveProviderUrl(config: AiConfig, url: string) {
+    const value = url.trim();
+    if (/^https?:\/\//i.test(value)) return value;
+    const baseUrl = config.baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
+    return new URL(value, `${baseUrl}/`).toString();
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -733,14 +807,14 @@ async function uploadNewTokenReferenceFile(file: File, options?: RequestOptions)
     return assertPublicReferenceReachable(url, file.type, "NewToken 参考素材", options);
 }
 
-async function assertPublicReferenceReachable(url: string, mimeType: string, label: string, options?: RequestOptions) {
+async function assertPublicReferenceReachable(url: string, mimeType: string, label: string, options?: RequestOptions): Promise<string> {
     try {
         const response = await axios.head(url, { signal: options?.signal }).catch(async (error) => {
             if (axios.isCancel(error) || options?.signal?.aborted) throw error;
             await probeUploadedReference(url, mimeType, options);
             return null;
         });
-        if (!response) return;
+        if (!response) return url;
         const contentType = String(response.headers["content-type"] || "").toLowerCase();
         const contentLength = Number(response.headers["content-length"] || 0);
         assertReferenceContentType(contentType, mimeType);

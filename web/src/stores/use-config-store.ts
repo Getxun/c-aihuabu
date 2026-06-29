@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
-export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken" | "duomiapi";
+export type ApiCallFormat = "openai" | "gemini" | "volcengine" | "openai-json" | "newtoken" | "duomiapi" | "lingdongapi";
 
 export type ModelChannel = {
     id: string;
@@ -131,7 +131,7 @@ type ConfigStore = {
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("runway") || value.includes("luma") || value.includes("pika") || value.includes("wan") || value.includes("hailuo");
+    return /^sd-\d/i.test(value) || value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("runway") || value.includes("luma") || value.includes("pika") || value.includes("wan") || value.includes("hailuo");
 }
 
 function isImageModelName(model: string) {
@@ -382,6 +382,7 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return GEMINI_BASE_URL;
     if (apiFormat === "volcengine") return "https://ark.cn-beijing.volces.com/api/plan/v3";
     if (apiFormat === "duomiapi") return "https://duomiapi.com";
+    if (apiFormat === "lingdongapi") return "https://www.lingdongapi.com";
     return OPENAI_BASE_URL;
 }
 
@@ -391,6 +392,7 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
     if (apiFormat === "openai-json") return "openai-json";
     if (apiFormat === "newtoken") return "newtoken";
     if (apiFormat === "duomiapi") return "duomiapi";
+    if (apiFormat === "lingdongapi") return "lingdongapi";
     return "openai";
 }
 

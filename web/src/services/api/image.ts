@@ -227,6 +227,12 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.url === "string" && item.url) {
         return item.url;
     }
+    if (typeof item.image_url === "string" && item.image_url) {
+        return item.image_url;
+    }
+    if (typeof item.output_url === "string" && item.output_url) {
+        return item.output_url;
+    }
     return null;
 }
 
@@ -828,8 +834,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
+                ...(requestConfig.apiFormat === "lingdongapi" ? {} : { response_format: "b64_json", output_format: IMAGE_OUTPUT_FORMAT }),
             },
             "application/json",
             options,
@@ -857,6 +862,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
+    if (requestConfig.apiFormat === "lingdongapi") {
+        if (mask) throw new Error("Lingdong 调用格式暂不支持蒙版编辑");
+        return requestLingdongImages(requestConfig, requestPrompt, references, n, options);
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const formData = new FormData();
@@ -881,6 +890,30 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
+    }
+}
+
+async function requestLingdongImages(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, options?: RequestOptions) {
+    try {
+        const imageUrls = await Promise.all(references.map((image) => resolveLingdongReferenceImageUrl(image, options)));
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const response = await postWithProxyFallback<ImageApiResponse>(
+            config,
+            "/images/generations",
+            {
+                model: config.model,
+                prompt: withSystemPrompt(config, prompt),
+                n: count,
+                ...(requestSize ? { size: requestSize } : {}),
+                ...(imageUrls.length ? { images: imageUrls } : {}),
+            },
+            "application/json",
+            options,
+        );
+        return parseImagePayload(response.data);
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Lingdong 图片生成失败"));
     }
 }
 
@@ -996,6 +1029,18 @@ async function resolveNewTokenReferenceImageUrl(image: ReferenceImage, options?:
     const url = response.data?.data?.url;
     if (!url) throw new Error(response.data?.msg || "NewToken 参考图片上传失败");
     if (!isReachableHttpsUrl(url)) throw new Error("NewToken 参考图片上传成功，但返回地址不是公网 HTTPS URL");
+    await assertUploadedReferenceReachable(url, options);
+    return url;
+}
+
+async function resolveLingdongReferenceImageUrl(image: ReferenceImage, options?: RequestOptions) {
+    const file = await dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) });
+    const form = new FormData();
+    form.append("file", file);
+    const response = await axios.post<{ code?: number; data?: { url?: string }; msg?: string }>("/api/uploads/references", form, { signal: options?.signal });
+    const url = response.data?.data?.url;
+    if (!url) throw new Error(response.data?.msg || "Lingdong 参考图片上传失败");
+    if (!isReachableHttpsUrl(url)) throw new Error("Lingdong 参考图片上传成功，但返回地址不是公网 HTTPS URL");
     await assertUploadedReferenceReachable(url, options);
     return url;
 }
