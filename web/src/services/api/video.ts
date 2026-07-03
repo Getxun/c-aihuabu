@@ -612,7 +612,7 @@ function normalizeNewTokenDuration(value: string, model: string) {
     if (model === "veo-3-1") return 8;
     if (model === "sora-2") return 12;
     const seconds = Math.floor(Number(value) || 6);
-    return Math.max(4, Math.min(15, seconds));
+    return Math.max(1, Math.min(15, seconds));
 }
 
 function normalizeNewTokenAspectRatio(value: string) {
