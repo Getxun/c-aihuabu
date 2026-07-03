@@ -37,19 +37,21 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
 
-    const model = modelOptionName(config.model || config.videoModel);
-    const modelLabel = modelOptionLabel(config, config.model || config.videoModel);
+    const modelValue = config.model || config.videoModel;
+    const model = modelOptionName(modelValue);
+    const modelLabel = modelOptionLabel(config, modelValue);
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
     const resolution = normalizeVideoResolutionValue(config.vquality);
 
     // 检测模型显示名称是否包含"固定"
-    const isFixedDurationModel = modelLabel.includes("固定");
+    const isFixedDurationModel = modelLabel.includes("固定") || model.includes("固定");
     const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
     const effectiveSeconds = isFixedDurationModel ? String(FIXED_DURATION) : seconds;
 
     // 调试日志
+    console.log("[VideoSettingsPanel] 原始模型值:", modelValue);
     console.log("[VideoSettingsPanel] 模型ID:", model);
     console.log("[VideoSettingsPanel] 模型显示名称:", modelLabel);
     console.log("[VideoSettingsPanel] 包含固定?:", isFixedDurationModel);
@@ -139,8 +141,9 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
 }
 
 function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
-    const model = modelOptionName(config.model || config.videoModel);
-    const modelLabel = modelOptionLabel(config, config.model || config.videoModel);
+    const modelValue = config.model || config.videoModel;
+    const model = modelOptionName(modelValue);
+    const modelLabel = modelOptionLabel(config, modelValue);
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
     const duration = normalizeSeedanceDuration(config.videoSeconds);
@@ -148,10 +151,11 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
     const watermark = boolConfig(config.videoWatermark, false);
 
     // 检测模型显示名称是否包含"固定"
-    const isFixedDurationModel = modelLabel.includes("固定");
+    const isFixedDurationModel = modelLabel.includes("固定") || model.includes("固定");
     const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
 
     // 调试日志
+    console.log("[SeedanceVideoSettingsPanel] 原始模型值:", modelValue);
     console.log("[SeedanceVideoSettingsPanel] 模型ID:", model);
     console.log("[SeedanceVideoSettingsPanel] 模型显示名称:", modelLabel);
     console.log("[SeedanceVideoSettingsPanel] 包含固定?:", isFixedDurationModel);
