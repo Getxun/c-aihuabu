@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/cangerx/c-aihuabu
+  IMAGE_NAME: ghcr.io/getxun/c-aihuabu
 
 jobs:
   meta:
