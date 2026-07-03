@@ -91,7 +91,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <div className="grid grid-cols-3 gap-2.5">
                         {secondOptions.map((value) => (
                             <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === 1 ? "长镜专用" : `${value}s`}
+                                {value === 15 ? "长镜专用" : `${value}s`}
                             </OptionPill>
                         ))}
                         <NumberInput value={seconds} min={1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
@@ -149,7 +149,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     <div className="grid grid-cols-4 gap-2.5">
                         {seedanceDurationOptions.map((value) => (
                             <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === -1 ? "智能" : value === 1 ? "长镜专用" : `${value}s`}
+                                {value === -1 ? "智能" : value === 15 ? "长镜专用" : `${value}s`}
                             </OptionPill>
                         ))}
                     </div>
