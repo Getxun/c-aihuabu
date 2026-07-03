@@ -48,6 +48,10 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
     const effectiveSeconds = isFixedDurationModel ? String(FIXED_DURATION) : seconds;
 
+    // 调试日志
+    console.log("[VideoSettingsPanel] 模型名称:", model);
+    console.log("[VideoSettingsPanel] 包含固定?:", isFixedDurationModel);
+
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 720));
         onConfigChange("size", `${key === "width" ? next : dimensions.width}x${key === "height" ? next : dimensions.height}`);
@@ -143,6 +147,10 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
     // 检测模型名称是否包含"固定"
     const isFixedDurationModel = model.includes("固定");
     const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
+
+    // 调试日志
+    console.log("[SeedanceVideoSettingsPanel] 模型名称:", model);
+    console.log("[SeedanceVideoSettingsPanel] 包含固定?:", isFixedDurationModel);
 
     // 如果是固定时长模型，强制使用15秒
     const effectiveDuration = isFixedDurationModel ? FIXED_DURATION : duration;
