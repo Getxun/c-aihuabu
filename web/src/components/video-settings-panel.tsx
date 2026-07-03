@@ -22,7 +22,7 @@ const sizeOptions = [
     { value: "auto", label: "auto", width: 0, height: 0 },
 ];
 
-const secondOptions = [6, 10, 12, 15];
+const secondOptions = [1, 6, 10, 12, 15];
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -91,7 +91,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <div className="grid grid-cols-3 gap-2.5">
                         {secondOptions.map((value) => (
                             <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value}s
+                                {value === 1 ? "长镜专用" : `${value}s`}
                             </OptionPill>
                         ))}
                         <NumberInput value={seconds} min={1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />

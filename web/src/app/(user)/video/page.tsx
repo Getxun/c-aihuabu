@@ -705,7 +705,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 
     return (
         <>
-            <label className="col-span-2 block min-w-0 sm:col-span-1">
+            <label className="col-span-2 block min-w-0">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
