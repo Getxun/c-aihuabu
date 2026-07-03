@@ -3,7 +3,7 @@ services:
     image: ghcr.io/getxun/c-aihuabu:latest
     container_name: infinite-canvas
     ports:
-      - "127.0.0.1:3300:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       C_AI_PUBLIC_BASE_URL: "https://ai.k99.tw"
       AI_HUABU_DATA_DIR: "/app/web/data/account"
