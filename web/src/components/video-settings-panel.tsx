@@ -149,7 +149,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     <div className="grid grid-cols-4 gap-2.5">
                         {seedanceDurationOptions.map((value) => (
                             <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === -1 ? "智能" : `${value}s`}
+                                {value === -1 ? "智能" : value === 1 ? "长镜专用" : `${value}s`}
                             </OptionPill>
                         ))}
                     </div>
