@@ -120,8 +120,8 @@ export function normalizeResolutionToken(value: string) {
 
 export function normalizeSeedanceDuration(value: string) {
     if (String(value).trim() === "-1") return -1;
-    const seconds = Math.floor(Number(value) || 5);
-    return Math.max(4, Math.min(15, seconds));
+    const seconds = Math.floor(Number(value) || 1);
+    return Math.max(1, Math.min(15, seconds));
 }
 
 export function normalizeSeedanceRatio(value: string) {
