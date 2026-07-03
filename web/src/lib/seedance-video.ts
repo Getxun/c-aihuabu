@@ -56,8 +56,9 @@ const seedancePixels = {
     },
 } as const;
 
-export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl" | "apiFormat">) {
-    const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
+export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl" | "apiFormat">, selectedModel?: string) {
+    const model = selectedModel || config.model || config.videoModel;
+    const requestConfig = "channels" in config ? resolveModelRequestConfig(config, model) : { ...config, model };
     return requestConfig.apiFormat === "volcengine" || isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel));
 }
 
@@ -73,6 +74,11 @@ export function isCaiSeedanceAliasModel(model: string) {
 
 export function isGrokImagineVideo15Model(model: string) {
     return model.toLowerCase().includes("grok-imagine-video-1.5");
+}
+
+export function isFixedDurationVideoModel(model: string, label = "") {
+    const value = `${modelOptionName(model)} ${model} ${label}`.toLowerCase();
+    return (value.includes("固定") && value.includes("15")) || value.includes("固定15秒") || value.includes("长镜专用") || value.includes("long-shot");
 }
 
 export function isNewTokenAllAroundVideoModel(model: string) {

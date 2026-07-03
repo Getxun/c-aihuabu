@@ -3,7 +3,7 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildSeedancePromptText, caiVideoModelCapabilities, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, buildSeedancePromptText, caiVideoModelCapabilities, isFixedDurationVideoModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildAiApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -109,7 +109,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const body = new FormData();
     body.append("model", modelOptionName(model));
     body.append("prompt", requestPrompt);
-    body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
+    body.append("seconds", normalizeVideoSeconds(config.videoSeconds, model));
     if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");
@@ -198,7 +198,7 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
     const payload: Record<string, any> = {
         model: modelOptionName(model),
         prompt: requestPrompt,
-        duration: normalizeCaiDuration(config.videoSeconds),
+        duration: normalizeCaiDuration(config.videoSeconds, model),
         metadata: {
             resolution: normalizeCaiResolution(config.vquality),
             ratio: ratio === "adaptive" ? "16:9" : ratio,
@@ -225,7 +225,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
     const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
     
-    const duration = normalizeSeedanceDuration(config.videoSeconds);
+    const duration = normalizeCaiDuration(config.videoSeconds, model);
     const ratio = normalizeSeedanceRatio(config.size);
     const resolution = normalizeSeedanceResolution(config.vquality, modelOptionName(model));
     const isSeedance = modelOptionName(model).toLowerCase().includes("seedance");
@@ -381,7 +381,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         content,
         ratio: normalizeSeedanceRatio(config.size),
         resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)).toUpperCase(),
-        duration: normalizeSeedanceDuration(config.videoSeconds),
+        duration: normalizeSeedanceRequestDuration(config.videoSeconds, model),
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         watermark: boolConfig(config.videoWatermark, false),
     };
@@ -496,7 +496,8 @@ function assertVideoConfig(config: AiConfig, model: string) {
     if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持视频生成，请使用 OpenAI 格式渠道");
 }
 
-function normalizeVideoSeconds(value: string) {
+function normalizeVideoSeconds(value: string, model = "") {
+    if (isFixedDurationVideoModel(model)) return "15";
     const seconds = Math.floor(Number(value) || 6);
     return String(Math.max(1, Math.min(20, seconds)));
 }
@@ -515,9 +516,14 @@ function normalizeVideoResolution(value: string) {
     return `${resolution}p`;
 }
 
-function normalizeCaiDuration(value: string) {
+function normalizeCaiDuration(value: string, model = "") {
+    if (isFixedDurationVideoModel(model)) return 15;
     const duration = normalizeSeedanceDuration(value);
     return duration === -1 ? 10 : duration;
+}
+
+function normalizeSeedanceRequestDuration(value: string, model: string) {
+    return isFixedDurationVideoModel(model) ? 15 : normalizeSeedanceDuration(value);
 }
 
 function normalizeCaiResolution(value: string) {
@@ -526,7 +532,7 @@ function normalizeCaiResolution(value: string) {
 }
 
 function normalizeLingdongDuration(value: string, model: string) {
-    const duration = normalizeCaiDuration(value);
+    const duration = normalizeCaiDuration(value, model);
     if (modelOptionName(model).toLowerCase() === "sora-2") {
         if (duration <= 4) return 4;
         if (duration <= 8) return 8;
@@ -607,6 +613,7 @@ function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: stri
 }
 
 function normalizeNewTokenDuration(value: string, model: string) {
+    if (isFixedDurationVideoModel(model)) return 15;
     if (model === "video-standard-720p") return 15;
     if (model === "veo-omni-flash" || model === "veo-omni-flash-video-edit") return 10;
     if (model === "veo-3-1") return 8;
@@ -631,14 +638,14 @@ function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: stri
         ],
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         ratio: normalizeNewTokenAspectRatio(config.size),
-        duration: normalizeCaiDuration(config.videoSeconds),
+        duration: normalizeCaiDuration(config.videoSeconds, model),
         resolution: normalizeSeedanceResolution(config.vquality, model).toLowerCase(),
         watermark: boolConfig(config.videoWatermark, false),
     };
 }
 
 function buildDuomiGrokPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[]) {
-    const duration = Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
+    const duration = isFixedDurationVideoModel(model) ? 15 : Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
     const payload: Record<string, any> = {
         model,
         prompt,
