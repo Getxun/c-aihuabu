@@ -3,8 +3,8 @@ import { message } from "antd";
 import { APP_VERSION } from "@/constant/env";
 import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
-const latestVersionUrl = "https://raw.githubusercontent.com/cangerx/c-aihuabu/main/VERSION";
-const latestChangelogUrl = "https://raw.githubusercontent.com/cangerx/c-aihuabu/main/CHANGELOG.md";
+const latestVersionUrl = "https://raw.githubusercontent.com/Getxun/c-aihuabu/main/VERSION";
+const latestChangelogUrl = "https://raw.githubusercontent.com/Getxun/c-aihuabu/main/CHANGELOG.md";
 
 function readLocalReleases(): ReleaseInfo[] {
     try {
