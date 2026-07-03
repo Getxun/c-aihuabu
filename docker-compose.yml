@@ -1,9 +1,6 @@
 services:
   app:
-    image: c-aihuabu:local
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/getxun/c-aihuabu:latest
     container_name: infinite-canvas
     ports:
       - "${C_AI_HOST_PORT:-3000}:3000"
