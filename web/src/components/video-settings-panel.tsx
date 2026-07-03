@@ -22,7 +22,7 @@ const sizeOptions = [
     { value: "auto", label: "auto", width: 0, height: 0 },
 ];
 
-const secondOptions = [4, 6, 10, 12, 15];
+const secondOptions = [4, 5, 10, 12, 15];
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -37,13 +37,29 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
 
+    const model = modelOptionName(config.model || config.videoModel);
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
     const resolution = normalizeVideoResolutionValue(config.vquality);
+
+    // 检测模型名称是否包含"固定"
+    const isFixedDurationModel = model.includes("固定");
+    const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
+    const effectiveSeconds = isFixedDurationModel ? String(FIXED_DURATION) : seconds;
+
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 720));
         onConfigChange("size", `${key === "width" ? next : dimensions.width}x${key === "height" ? next : dimensions.height}`);
+    };
+
+    // 处理时长变更
+    const handleSecondsChange = (value: string) => {
+        if (isFixedDurationModel && value !== String(FIXED_DURATION)) {
+            alert(`当前模型「${model}」仅支持长镜专用(15秒)，无法修改时长`);
+            return;
+        }
+        onConfigChange("videoSeconds", value);
     };
 
     return (
@@ -88,13 +104,27 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="秒数" color={theme.node.muted}>
+                    {isFixedDurationModel ? (
+                        <div className="mb-2 rounded-lg border border-orange-500 bg-orange-500/10 px-3 py-2 text-[11px] leading-4" style={{ color: theme.node.text }}>
+                            ⚠️ 当前模型仅支持长镜专用(15秒)，无法修改时长
+                        </div>
+                    ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
-                        {secondOptions.map((value) => (
-                            <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === 15 ? "长镜专用" : `${value}s`}
-                            </OptionPill>
-                        ))}
-                        <NumberInput value={seconds} min={1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        {secondOptions.map((value) => {
+                            const isDisabled = isFixedDurationModel && value !== FIXED_DURATION;
+                            return (
+                                <OptionPill
+                                    key={value}
+                                    selected={effectiveSeconds === String(value)}
+                                    disabled={isDisabled}
+                                    theme={theme}
+                                    onClick={() => handleSecondsChange(String(value))}
+                                >
+                                    {value === 15 ? "长镜专用" : `${value}s`}
+                                </OptionPill>
+                            );
+                        })}
+                        <NumberInput value={effectiveSeconds} min={1} max={15} disabled={isFixedDurationModel} theme={theme} onChange={handleSecondsChange} />
                     </div>
                 </SettingGroup>
             </div>
@@ -109,6 +139,23 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
     const duration = normalizeSeedanceDuration(config.videoSeconds);
     const generateAudio = boolConfig(config.videoGenerateAudio, true);
     const watermark = boolConfig(config.videoWatermark, false);
+
+    // 检测模型名称是否包含"固定"
+    const isFixedDurationModel = model.includes("固定");
+    const FIXED_DURATION = 15; // 固定时长为15秒（长镜专用）
+
+    // 如果是固定时长模型，强制使用15秒
+    const effectiveDuration = isFixedDurationModel ? FIXED_DURATION : duration;
+
+    // 处理时长变更
+    const handleDurationChange = (value: string) => {
+        if (isFixedDurationModel && value !== String(FIXED_DURATION)) {
+            // 显示提示信息
+            alert(`当前模型「${model}」仅支持长镜专用(15秒)，无法修改时长`);
+            return;
+        }
+        onConfigChange("videoSeconds", value);
+    };
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -146,14 +193,35 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
+                    {isFixedDurationModel ? (
+                        <div className="mb-2 rounded-lg border border-orange-500 bg-orange-500/10 px-3 py-2 text-[11px] leading-4" style={{ color: theme.node.text }}>
+                            ⚠️ 当前模型仅支持长镜专用(15秒)，无法修改时长
+                        </div>
+                    ) : null}
                     <div className="grid grid-cols-4 gap-2.5">
-                        {seedanceDurationOptions.map((value) => (
-                            <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === -1 ? "智能" : value === 15 ? "长镜专用" : `${value}s`}
-                            </OptionPill>
-                        ))}
+                        {seedanceDurationOptions.map((value) => {
+                            const isDisabled = isFixedDurationModel && value !== FIXED_DURATION;
+                            return (
+                                <OptionPill
+                                    key={value}
+                                    selected={effectiveDuration === value}
+                                    disabled={isDisabled}
+                                    theme={theme}
+                                    onClick={() => handleDurationChange(String(value))}
+                                >
+                                    {value === -1 ? "智能" : value === 15 ? "长镜专用" : `${value}s`}
+                                </OptionPill>
+                            );
+                        })}
                     </div>
-                    <NumberInput value={String(duration)} min={-1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                    <NumberInput
+                        value={String(effectiveDuration)}
+                        min={-1}
+                        max={15}
+                        disabled={isFixedDurationModel}
+                        theme={theme}
+                        onChange={handleDurationChange}
+                    />
                 </SettingGroup>
                 <SettingGroup title="输出" color={theme.node.muted}>
                     <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -236,8 +304,8 @@ function DimensionInput({ prefix, value, disabled, theme, onChange }: { prefix: 
     );
 }
 
-function NumberInput({ value, min, max, theme, onChange }: { value: string; min: number; max: number; theme: CanvasTheme; onChange: (value: string) => void }) {
-    return <input type="number" min={min} max={max} className="h-9 rounded-full border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }} value={value} onChange={(event) => onChange(event.target.value)} onMouseDown={(event) => event.stopPropagation()} />;
+function NumberInput({ value, min, max, disabled = false, theme, onChange }: { value: string; min: number; max: number; disabled?: boolean; theme: CanvasTheme; onChange: (value: string) => void }) {
+    return <input type="number" min={min} max={max} disabled={disabled} className="h-9 rounded-full border bg-transparent px-3 text-center text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }} value={value} onChange={(event) => onChange(event.target.value)} onMouseDown={(event) => event.stopPropagation()} />;
 }
 
 function SizePreview({ width, height, color }: { width: number; height: number; color: string }) {
