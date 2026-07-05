@@ -429,7 +429,8 @@ export default function VideoPage() {
         setRunningCount((value) => value + 1);
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
-        const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        // 使用当前的有效配置（包含渠道信息），但保留日志中的视频生成参数
+        const taskConfig = buildVideoConfig({ ...log.config, ...effectiveConfig }, log.task.model || log.model);
         let latestLog = log;
         let consecutiveErrors = 0;
         const baseDelay = log.task.provider === "seedance" ? 5000 : 2500;
@@ -913,7 +914,10 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         ? {
               ...log.video,
               url: log.video.storageKey ? await resolveMediaUrl(log.video.storageKey, log.video.url) : log.video.url,
-              thumbnailUrl: log.video.thumbnailStorageKey ? await resolveMediaUrl(log.video.thumbnailStorageKey, log.video.thumbnailUrl) : log.video.thumbnailUrl,
+              // 清理失效的blob URL和空字符串
+              thumbnailUrl: log.video.thumbnailStorageKey
+                  ? await resolveMediaUrl(log.video.thumbnailStorageKey, log.video.thumbnailUrl)
+                  : (!log.video.thumbnailUrl || log.video.thumbnailUrl.startsWith("blob:") ? undefined : log.video.thumbnailUrl),
           }
         : log.video;
     const videoReferences = await Promise.all(
