@@ -980,7 +980,8 @@ function captureVideoFrame(url: string) {
                 finish();
             }
         };
-        video.crossOrigin = "anonymous";
+        // 移除 crossOrigin 以避免CORS问题
+        // video.crossOrigin = "anonymous";
         video.muted = true;
         video.playsInline = true;
         video.preload = "metadata";
