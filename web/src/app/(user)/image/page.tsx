@@ -234,15 +234,37 @@ export default function ImagePage() {
         }
     };
 
-    const downloadImage = (image: GeneratedImage, index: number) => {
-        const link = document.createElement("a");
-        link.href = image.dataUrl;
-        link.download = `image-${index + 1}.png`;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const downloadImage = async (image: GeneratedImage, index: number) => {
+        // 检测是否是跨域URL
+        const isExternalUrl = image.dataUrl.startsWith("http") && !image.dataUrl.startsWith(window.location.origin) && !image.dataUrl.startsWith("blob:") && !image.dataUrl.startsWith("data:");
+
+        if (isExternalUrl) {
+            // 跨域URL：先下载为blob再保存，避免跳转
+            try {
+                const response = await fetch(image.dataUrl);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = `image-${index + 1}.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            } catch (error) {
+                message.error("下载失败，可能是跨域限制");
+            }
+        } else {
+            // 本地URL或data URL：直接下载
+            const link = document.createElement("a");
+            link.href = image.dataUrl;
+            link.download = `image-${index + 1}.png`;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {

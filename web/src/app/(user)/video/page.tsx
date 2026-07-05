@@ -253,15 +253,37 @@ export default function VideoPage() {
         void generate();
     };
 
-    const downloadVideo = (video: GeneratedVideo) => {
-        const link = document.createElement("a");
-        link.href = video.url;
-        link.download = "video.mp4";
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const downloadVideo = async (video: GeneratedVideo) => {
+        // 检测是否是跨域URL
+        const isExternalUrl = video.url.startsWith("http") && !video.url.startsWith(window.location.origin) && !video.url.startsWith("blob:");
+
+        if (isExternalUrl) {
+            // 跨域URL：先下载为blob再保存，避免跳转
+            try {
+                const response = await fetch(video.url);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = "video.mp4";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            } catch (error) {
+                message.error("下载失败，可能是跨域限制");
+            }
+        } else {
+            // 本地URL：直接下载
+            const link = document.createElement("a");
+            link.href = video.url;
+            link.download = "video.mp4";
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     };
 
     const saveResultToAssets = (video: GeneratedVideo) => {

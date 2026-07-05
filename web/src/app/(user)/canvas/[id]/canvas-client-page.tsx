@@ -1965,19 +1965,42 @@ function InfiniteCanvasPage() {
         setConnections((prev) => prev.filter((c) => !(c.fromNodeId === refNodeId && c.toNodeId === targetNodeId)));
     }, []);
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
         const ext = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content);
         const filename = `canvas-${node.type}-${node.id}.${ext}`;
+        const url = node.metadata.content;
 
-        const link = document.createElement("a");
-        link.href = node.metadata.content;
-        link.download = filename;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // 检测是否是跨域URL
+        const isExternalUrl = url.startsWith("http") && !url.startsWith(window.location.origin) && !url.startsWith("blob:") && !url.startsWith("data:");
+
+        if (isExternalUrl) {
+            // 跨域URL：先下载为blob再保存，避免跳转
+            try {
+                const response = await fetch(url);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            } catch (error) {
+                message.error("下载失败，可能是跨域限制");
+            }
+        } else {
+            // 本地URL：直接下载
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     }, []);
 
     const copyNodeImage = useCallback(async (node: CanvasNodeData) => {

@@ -147,20 +147,43 @@ export default function AssetsPage() {
         copyText(asset.data.content, "文本已复制");
     };
 
-    const downloadImage = (asset: Asset) => {
+    const downloadImage = async (asset: Asset) => {
         if (asset.kind !== "image" && asset.kind !== "video") return;
         const url = asset.kind === "video" ? asset.data.url : asset.data.dataUrl;
         const ext = asset.data.mimeType.split("/")[1] || "png";
         const filename = `${asset.title || "asset"}.${ext}`;
 
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // 检测是否是跨域URL
+        const isExternalUrl = url.startsWith("http") && !url.startsWith(window.location.origin) && !url.startsWith("blob:");
+
+        if (isExternalUrl) {
+            // 跨域URL：先下载为blob再保存，避免跳转
+            try {
+                const response = await fetch(url);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                // 延迟释放blob URL
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            } catch (error) {
+                message.error("下载失败，可能是跨域限制");
+            }
+        } else {
+            // 本地URL或同域URL：直接下载
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     };
 
     const exportAllAssets = async () => {
