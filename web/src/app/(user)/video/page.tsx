@@ -768,9 +768,10 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
                     <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)}>
                         添加到素材
                     </Button>
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(video)}>
+                    {/* 下载按钮已隐藏，请使用视频播放器原生下载功能 */}
+                    {/* <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(video)}>
                         下载
-                    </Button>
+                    </Button> */}
                 </div>
             </div>
         </div>
