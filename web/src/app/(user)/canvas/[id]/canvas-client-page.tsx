@@ -1965,16 +1965,19 @@ function InfiniteCanvasPage() {
         setConnections((prev) => prev.filter((c) => !(c.fromNodeId === refNodeId && c.toNodeId === targetNodeId)));
     }, []);
 
-    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        try {
-            const response = await fetch(node.metadata.content);
-            const blob = await response.blob();
-            const ext = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content);
-            saveAs(blob, `canvas-${node.type}-${node.id}.${ext}`);
-        } catch (error) {
-            message.error("下载失败，请重试");
-        }
+        const ext = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content);
+        const filename = `canvas-${node.type}-${node.id}.${ext}`;
+
+        const link = document.createElement("a");
+        link.href = node.metadata.content;
+        link.download = filename;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }, []);
 
     const copyNodeImage = useCallback(async (node: CanvasNodeData) => {

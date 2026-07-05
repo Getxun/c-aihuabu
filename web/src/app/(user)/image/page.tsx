@@ -235,7 +235,14 @@ export default function ImagePage() {
     };
 
     const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+        const link = document.createElement("a");
+        link.href = image.dataUrl;
+        link.download = `image-${index + 1}.png`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {

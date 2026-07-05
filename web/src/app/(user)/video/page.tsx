@@ -253,14 +253,15 @@ export default function VideoPage() {
         void generate();
     };
 
-    const downloadVideo = async (video: GeneratedVideo) => {
-        try {
-            const response = await fetch(video.url);
-            const blob = await response.blob();
-            saveAs(blob, "video.mp4");
-        } catch (error) {
-            message.error("下载失败，请重试");
-        }
+    const downloadVideo = (video: GeneratedVideo) => {
+        const link = document.createElement("a");
+        link.href = video.url;
+        link.download = "video.mp4";
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     const saveResultToAssets = (video: GeneratedVideo) => {
@@ -623,7 +624,7 @@ export default function VideoPage() {
                                                 <span className="shrink-0 rounded bg-stone-200 px-1 text-[10px] text-stone-700 dark:bg-stone-800 dark:text-stone-200">{seedanceReferenceLabel("audio", index)}</span>
                                                 <span className="truncate">{item.name}</span>
                                             </div>
-                                            <audio src={item.url} controls controlsList="nodownload" onContextMenu={(e) => e.preventDefault()} className="h-8 w-full" preload="metadata" />
+                                            <audio src={item.url} controls className="h-8 w-full" preload="metadata" />
                                             <ReferenceOrderButtons index={index} total={audioReferences.length} onMove={(offset) => setAudioReferences((value) => moveListItem(value, index, offset))} />
                                             <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => setAudioReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label="移除参考音频">
                                                 <Trash2 className="size-3.5" />
@@ -726,7 +727,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <video src={video.url} controls controlsList="nodownload" onContextMenu={(e) => e.preventDefault()} className="aspect-video w-full bg-black object-contain" />
+            <video src={video.url} controls className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
