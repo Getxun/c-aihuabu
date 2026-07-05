@@ -562,9 +562,10 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                                 复制文本
                             </Button>
                         ) : null}
-                        {asset.kind === "image" || asset.kind === "video" ? (
+                        {/* 视频下载按钮已隐藏，请使用播放器原生下载功能 */}
+                        {asset.kind === "image" ? (
                             <Button type="primary" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
-                                {asset.kind === "video" ? "下载视频" : "下载图片"}
+                                下载图片
                             </Button>
                         ) : null}
                     </Space>
