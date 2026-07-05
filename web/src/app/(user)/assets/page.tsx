@@ -147,9 +147,17 @@ export default function AssetsPage() {
         copyText(asset.data.content, "文本已复制");
     };
 
-    const downloadImage = (asset: Asset) => {
+    const downloadImage = async (asset: Asset) => {
         if (asset.kind !== "image" && asset.kind !== "video") return;
-        saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`);
+        try {
+            const url = asset.kind === "video" ? asset.data.url : asset.data.dataUrl;
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const ext = asset.data.mimeType.split("/")[1] || "png";
+            saveAs(blob, `${asset.title || "asset"}.${ext}`);
+        } catch (error) {
+            message.error("下载失败，请重试");
+        }
     };
 
     const exportAllAssets = async () => {
@@ -501,7 +509,7 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         {asset.kind === "text" ? (
                             <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
                         ) : asset.kind === "video" ? (
-                            <video src={asset.data.url} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
+                            <video src={asset.data.url} controls controlsList="nodownload" onContextMenu={(e) => e.preventDefault()} className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : (
                             <Typography.Text className="mt-2 block">
                                 {asset.data.width}x{asset.data.height} · {formatBytes(asset.data.bytes)} · {asset.data.mimeType}

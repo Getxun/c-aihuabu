@@ -1965,9 +1965,16 @@ function InfiniteCanvasPage() {
         setConnections((prev) => prev.filter((c) => !(c.fromNodeId === refNodeId && c.toNodeId === targetNodeId)));
     }, []);
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
+        try {
+            const response = await fetch(node.metadata.content);
+            const blob = await response.blob();
+            const ext = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content);
+            saveAs(blob, `canvas-${node.type}-${node.id}.${ext}`);
+        } catch (error) {
+            message.error("下载失败，请重试");
+        }
     }, []);
 
     const copyNodeImage = useCallback(async (node: CanvasNodeData) => {

@@ -771,7 +771,7 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
         );
     return (
         <div className="relative h-full w-full">
-            <video src={node.metadata.content} controls draggable={false} className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} />
+            <video src={node.metadata.content} controls controlsList="nodownload" onContextMenu={(e) => e.preventDefault()} draggable={false} className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} />
             <div className="absolute inset-x-10 top-2 z-30 h-7 cursor-move rounded-full border text-center text-[10px] font-medium leading-7 opacity-70 backdrop-blur transition hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-drag-handle>
                 拖动视频
             </div>
@@ -811,7 +811,7 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <audio src={node.metadata.content} controls controlsList="nodownload" onContextMenu={(e) => e.preventDefault()} className="w-full" data-canvas-no-zoom />
         </div>
     );
 }
