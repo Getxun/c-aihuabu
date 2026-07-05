@@ -438,12 +438,18 @@ export default function VideoPage() {
                 if (deletedLogIdsRef.current.has(log.id)) return;
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
-                    const thumbnail = await createStoredVideoThumbnail(stored.url);
+                    let thumbnail;
+                    try {
+                        thumbnail = await createStoredVideoThumbnail(stored.url);
+                    } catch (error) {
+                        console.warn("缩略图生成失败，将使用视频URL作为封面:", error);
+                        thumbnail = undefined;
+                    }
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
                         storageKey: stored.storageKey,
-                        thumbnailUrl: thumbnail?.url,
+                        thumbnailUrl: thumbnail?.url || stored.url,
                         thumbnailStorageKey: thumbnail?.storageKey,
                         durationMs: Date.now() - latestLog.createdAt,
                         width: stored.width || 1280,
