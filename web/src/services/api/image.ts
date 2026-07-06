@@ -875,7 +875,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     if (requestFormat === "lingdongapi") {
         if (mask) throw new Error("Lingdong 调用格式暂不支持蒙版编辑");
-        return requestLingdongImages(routedConfig, requestPrompt, references, n, options);
+        return requestLingdongImages(routedConfig, requestPrompt, references, n, options, requestConfig.apiFormat === "newtoken");
     }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -904,9 +904,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
 }
 
-async function requestLingdongImages(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, options?: RequestOptions) {
+async function requestLingdongImages(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, options?: RequestOptions, useNewTokenUpload = false) {
     try {
-        const imageUrls = await Promise.all(references.map((image) => resolveLingdongReferenceImageUrl(image, options)));
+        const imageUrls = await Promise.all(references.map((image) => (useNewTokenUpload ? resolveNewTokenReferenceImageUrl : resolveLingdongReferenceImageUrl)(image, options)));
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
         const response = await postWithProxyFallback<ImageApiResponse>(

@@ -72,7 +72,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         return createDuomiVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (requestFormat === "lingdongapi") {
-        return createLingdongVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+        return createLingdongVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options, requestConfig.apiFormat === "newtoken");
     }
     if (requestFormat === "newtoken") {
         return createNewTokenVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
@@ -174,16 +174,16 @@ async function createDuomiVideoTask(config: AiConfig, model: string, prompt: str
     }
 }
 
-async function createLingdongVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+async function createLingdongVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, useNewTokenUpload = false): Promise<VideoGenerationTask> {
     const modelName = modelOptionName(model);
     const limits = lingdongReferenceLimits(modelName);
     const selectedImages = references.slice(0, limits.images);
     const videoLimit = limits.mediaTotal ? Math.min(limits.videos, Math.max(0, limits.mediaTotal - selectedImages.length)) : limits.videos;
     const selectedVideos = videoReferences.slice(0, videoLimit);
     const selectedAudios = audioReferences.slice(0, limits.audios);
-    const imageUrls = await Promise.all(selectedImages.map((image) => resolveCaiImageUrl(image, options)));
-    const videoUrls = await Promise.all(selectedVideos.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
-    const audioUrls = await Promise.all(selectedAudios.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const imageUrls = await Promise.all(selectedImages.map((image) => (useNewTokenUpload ? resolveNewTokenImageUrl : resolveCaiImageUrl)(image, options)));
+    const videoUrls = await Promise.all(selectedVideos.map((video) => (useNewTokenUpload ? resolveNewTokenMediaUrl : resolveCaiMediaUrl)(video, "参考视频", options)));
+    const audioUrls = await Promise.all(selectedAudios.map((audio) => (useNewTokenUpload ? resolveNewTokenMediaUrl : resolveCaiMediaUrl)(audio, "参考音频", options)));
     const payload: Record<string, any> = {
         model: modelName,
         prompt: buildSeedancePromptText(prompt, selectedImages, selectedVideos, selectedAudios),
