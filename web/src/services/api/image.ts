@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import { buildAiApiUrl, buildApiUrl, buildForcedProxiedUrl, buildProxiedUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildAiApiUrl, buildApiUrl, buildForcedProxiedUrl, buildProxiedUrl, modelOptionName, resolveModelApiFormat, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -257,8 +257,12 @@ function parseImagePayload(payload: ImageApiResponse) {
 }
 
 function isNewTokenAsyncImageModel(config: AiConfig) {
-    const model = (config.model || config.imageModel).trim().toLowerCase();
-    return config.apiFormat === "newtoken" && /^gpt-image2-(1k|2k|4k)$/.test(model);
+    const model = modelApiRuleName(config.model || config.imageModel).toLowerCase();
+    return resolveModelApiFormat(config) === "newtoken" && /^gpt-image2-(1k|2k|4k)$/.test(model);
+}
+
+function modelApiRuleName(value: string) {
+    return modelOptionName(value).replace(/\[(ld|nt|dm|vk)\]$/i, "").trim();
 }
 
 function unwrapImageTask(payload: ImageTaskResponse): ImageTaskResponse {
@@ -532,7 +536,7 @@ async function requestChatToolResponse(config: AiConfig, messages: ResponseInput
         method: "POST",
         headers: aiHeaders(config, "application/json"),
         body: JSON.stringify({
-            model: config.model,
+            model: modelOptionName(config.model),
             messages: toChatMessages(withSystemMessage(config, messages)),
             tools: tools.map(toChatTool),
             tool_choice: toChatToolChoice(toolChoice),
@@ -758,7 +762,7 @@ async function requestNewTokenAsyncImageOnce(config: AiConfig, prompt: string, r
                     config,
                     "/videos",
                     {
-                        model: config.model,
+                        model: modelOptionName(config.model),
                         prompt: withSystemPrompt(config, prompt),
                         seconds: "4",
                         aspect_ratio: normalizeNewTokenImageRatio(config.size),
@@ -814,13 +818,15 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const requestFormat = resolveModelApiFormat(requestConfig);
+    const routedConfig = { ...requestConfig, apiFormat: requestFormat };
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    if (isNewTokenAsyncImageModel(requestConfig)) {
-        return requestNewTokenAsyncImages(requestConfig, prompt, [], n, options);
+    if (isNewTokenAsyncImageModel(routedConfig)) {
+        return requestNewTokenAsyncImages(routedConfig, prompt, [], n, options);
     }
-    if (requestConfig.apiFormat === "gemini") {
+    if (requestFormat === "gemini") {
         try {
-            return await requestGeminiImages(requestConfig, prompt, [], n, options);
+            return await requestGeminiImages(routedConfig, prompt, [], n, options);
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
@@ -829,15 +835,15 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(quality, config.size);
     try {
         const response = await postWithProxyFallback<ImageApiResponse>(
-            requestConfig,
+            routedConfig,
             "/images/generations",
             {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
+                model: modelOptionName(routedConfig.model),
+                prompt: withSystemPrompt(routedConfig, prompt),
                 n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...(requestConfig.apiFormat === "lingdongapi" ? {} : { response_format: "b64_json", output_format: IMAGE_OUTPUT_FORMAT }),
+                ...(requestFormat === "lingdongapi" ? {} : { response_format: "b64_json", output_format: IMAGE_OUTPUT_FORMAT }),
             },
             "application/json",
             options,
@@ -851,29 +857,31 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const requestFormat = resolveModelApiFormat(requestConfig);
+    const routedConfig = { ...requestConfig, apiFormat: requestFormat };
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    if (isNewTokenAsyncImageModel(requestConfig)) {
+    if (isNewTokenAsyncImageModel(routedConfig)) {
         if (mask) throw new Error("NewToken gpt-image2 异步接口暂不支持蒙版编辑");
-        return requestNewTokenAsyncImages(requestConfig, requestPrompt, references, n, options);
+        return requestNewTokenAsyncImages(routedConfig, requestPrompt, references, n, options);
     }
-    if (requestConfig.apiFormat === "gemini") {
+    if (requestFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
         try {
-            return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+            return await requestGeminiImages(routedConfig, requestPrompt, references, n, options);
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    if (requestConfig.apiFormat === "lingdongapi") {
+    if (requestFormat === "lingdongapi") {
         if (mask) throw new Error("Lingdong 调用格式暂不支持蒙版编辑");
-        return requestLingdongImages(requestConfig, requestPrompt, references, n, options);
+        return requestLingdongImages(routedConfig, requestPrompt, references, n, options);
     }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
+    formData.set("model", modelOptionName(routedConfig.model));
+    formData.set("prompt", withSystemPrompt(routedConfig, requestPrompt));
     formData.set("n", String(n));
     formData.set("response_format", "b64_json");
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);
@@ -888,7 +896,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await postWithProxyFallback<ImageApiResponse>(requestConfig, "/images/edits", formData, undefined, options);
+        const response = await postWithProxyFallback<ImageApiResponse>(routedConfig, "/images/edits", formData, undefined, options);
         const images = parseImagePayload(response.data);
         return images;
     } catch (error) {
@@ -905,7 +913,7 @@ async function requestLingdongImages(config: AiConfig, prompt: string, reference
             config,
             "/images/generations",
             {
-                model: config.model,
+                model: modelOptionName(config.model),
                 prompt: withSystemPrompt(config, prompt),
                 n: count,
                 ...(requestSize ? { size: requestSize } : {}),
@@ -929,7 +937,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             return answer;
         }
         const answer = (await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
+            model: modelOptionName(requestConfig.model),
             input: toResponseInput(withSystemMessage(requestConfig, messages)),
         }, onDelta, options)).content || "没有返回内容";
         if (answer === "没有返回内容") onDelta(answer);
@@ -947,7 +955,7 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
         }
         try {
             return await requestStreamingResponse(requestConfig, {
-                model: requestConfig.model,
+                model: modelOptionName(requestConfig.model),
                 input: toResponseInput(withSystemMessage(requestConfig, messages)),
                 tools: tools.map(toResponseTool),
                 tool_choice: toolChoice,

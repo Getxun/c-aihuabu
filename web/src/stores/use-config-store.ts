@@ -300,6 +300,24 @@ export function modelOptionName(value: string) {
     return decodeChannelModel(value)?.model || value;
 }
 
+const MODEL_API_SUFFIX_FORMATS = {
+    ld: "lingdongapi",
+    nt: "newtoken",
+    dm: "duomiapi",
+    vk: "volcengine",
+} as const satisfies Record<string, ApiCallFormat>;
+
+type ModelApiSuffix = keyof typeof MODEL_API_SUFFIX_FORMATS;
+
+export function detectModelApiFormat(value: string): ApiCallFormat | null {
+    const match = modelOptionName(value).trim().match(/\[(ld|nt|dm|vk)\]$/i);
+    return match ? MODEL_API_SUFFIX_FORMATS[match[1].toLowerCase() as ModelApiSuffix] : null;
+}
+
+export function resolveModelApiFormat(config: Pick<AiConfig, "apiFormat" | "model" | "imageModel" | "videoModel">, value?: string): ApiCallFormat {
+    return detectModelApiFormat(value || config.model || config.imageModel || config.videoModel) || config.apiFormat;
+}
+
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;

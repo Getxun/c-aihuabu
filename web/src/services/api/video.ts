@@ -4,7 +4,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, caiVideoModelCapabilities, isFixedDurationVideoModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { buildAiApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { buildAiApiUrl, modelOptionName, resolveModelApiFormat, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -65,37 +65,41 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
-    assertVideoConfig(requestConfig, requestConfig.model);
-    if (requestConfig.apiFormat === "duomiapi") {
-        return createDuomiVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    const requestFormat = resolveModelApiFormat(requestConfig, selectedModel);
+    const routedConfig = { ...requestConfig, apiFormat: requestFormat };
+    assertVideoConfig(routedConfig, routedConfig.model);
+    if (requestFormat === "duomiapi") {
+        return createDuomiVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (requestConfig.apiFormat === "lingdongapi") {
-        return createLingdongVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    if (requestFormat === "lingdongapi") {
+        return createLingdongVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (requestConfig.apiFormat === "newtoken") {
-        return createNewTokenVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    if (requestFormat === "newtoken") {
+        return createNewTokenVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (requestConfig.apiFormat === "volcengine") {
-        return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    if (requestFormat === "volcengine") {
+        return createSeedanceTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) {
-        return isCaiSdModel(requestConfig.model) ? createCaiSdVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options) : createCaiStandardVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    if (requestFormat === "openai-json" || isLikelyCaiVideoChannel(routedConfig.baseUrl)) {
+        return isCaiSdModel(routedConfig.model) ? createCaiSdVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options) : createCaiStandardVideoTask(routedConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (videoReferences.length || audioReferences.length) {
         throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考素材");
     }
-    return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
+    return createOpenAIVideoTask(routedConfig, selectedModel, prompt, references, options);
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
-    assertVideoConfig(requestConfig, requestConfig.model);
-    if (requestConfig.apiFormat === "duomiapi") return pollDuomiVideoTask(requestConfig, task, options);
-    if (requestConfig.apiFormat === "lingdongapi") return pollLingdongVideoTask(requestConfig, task, options);
-    if (requestConfig.apiFormat === "newtoken") return pollNewTokenVideoTask(requestConfig, task, options);
-    if (requestConfig.apiFormat === "volcengine") return pollSeedanceTask(requestConfig, task, options);
-    if (requestConfig.apiFormat === "openai-json" || isLikelyCaiVideoChannel(requestConfig.baseUrl)) return isCaiSdModel(requestConfig.model) ? pollCaiSdVideoTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
-    return pollOpenAIVideoTask(requestConfig, task, options);
+    const requestFormat = resolveModelApiFormat(requestConfig, task.model);
+    const routedConfig = { ...requestConfig, apiFormat: requestFormat };
+    assertVideoConfig(routedConfig, routedConfig.model);
+    if (requestFormat === "duomiapi") return pollDuomiVideoTask(routedConfig, task, options);
+    if (requestFormat === "lingdongapi") return pollLingdongVideoTask(routedConfig, task, options);
+    if (requestFormat === "newtoken") return pollNewTokenVideoTask(routedConfig, task, options);
+    if (requestFormat === "volcengine") return pollSeedanceTask(routedConfig, task, options);
+    if (requestFormat === "openai-json" || isLikelyCaiVideoChannel(routedConfig.baseUrl)) return isCaiSdModel(routedConfig.model) ? pollCaiSdVideoTask(routedConfig, task, options) : pollOpenAIVideoTask(routedConfig, task, options);
+    return pollOpenAIVideoTask(routedConfig, task, options);
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
@@ -109,9 +113,10 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const requestPrompt = buildSeedancePromptText(prompt, references, [], []);
     const body = new FormData();
-    body.append("model", modelOptionName(model));
+    const modelName = modelOptionName(model);
+    body.append("model", modelName);
     body.append("prompt", requestPrompt);
-    body.append("seconds", normalizeVideoSeconds(config.videoSeconds, model));
+    body.append("seconds", normalizeVideoSeconds(config.videoSeconds, modelApiRuleName(modelName)));
     if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");
@@ -128,12 +133,14 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 }
 
 async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     const imageUrls = await Promise.all(references.map((image) => resolveNewTokenImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveNewTokenMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveNewTokenMediaUrl(audio, "参考音频", options)));
     const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
-    assertGrokImagineVideo15Reference(model, imageUrls);
-    const payload = buildNewTokenVideoPayload(config, model, requestPrompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    assertGrokImagineVideo15Reference(ruleName, imageUrls);
+    const payload = buildNewTokenVideoPayload(config, modelName, requestPrompt, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -147,12 +154,13 @@ async function createNewTokenVideoTask(config: AiConfig, model: string, prompt: 
 
 async function createDuomiVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
     const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
-    assertGrokImagineVideo15Reference(modelName, imageUrls);
-    const isGrok = modelName.toLowerCase().includes("grok");
+    assertGrokImagineVideo15Reference(ruleName, imageUrls);
+    const isGrok = ruleName.toLowerCase().includes("grok");
     const payload = isGrok ? buildDuomiGrokPayload(config, modelName, requestPrompt, imageUrls) : buildDuomiSeedancePayload(config, modelName, requestPrompt, imageUrls, videoUrls, audioUrls);
     const path = isGrok ? "/videos/generations" : "/contents/generations/tasks";
 
@@ -167,15 +175,21 @@ async function createDuomiVideoTask(config: AiConfig, model: string, prompt: str
 }
 
 async function createLingdongVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
-    const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
-    const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
+    const modelName = modelOptionName(model);
+    const limits = lingdongReferenceLimits(modelName);
+    const selectedImages = references.slice(0, limits.images);
+    const videoLimit = limits.mediaTotal ? Math.min(limits.videos, Math.max(0, limits.mediaTotal - selectedImages.length)) : limits.videos;
+    const selectedVideos = videoReferences.slice(0, videoLimit);
+    const selectedAudios = audioReferences.slice(0, limits.audios);
+    const imageUrls = await Promise.all(selectedImages.map((image) => resolveCaiImageUrl(image, options)));
+    const videoUrls = await Promise.all(selectedVideos.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
+    const audioUrls = await Promise.all(selectedAudios.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
     const payload: Record<string, any> = {
-        model: modelOptionName(model),
-        prompt: buildSeedancePromptText(prompt, references, videoReferences, audioReferences),
-        duration: normalizeLingdongDuration(config.videoSeconds, model),
+        model: modelName,
+        prompt: buildSeedancePromptText(prompt, selectedImages, selectedVideos, selectedAudios),
+        duration: normalizeLingdongDuration(config.videoSeconds, modelName),
     };
-    appendLingdongSize(payload, config, model);
+    appendLingdongSize(payload, config, modelName);
     if (imageUrls.length) payload.images = imageUrls;
     if (videoUrls.length) payload.videos = videoUrls;
     if (audioUrls.length) payload.audios = audioUrls;
@@ -191,16 +205,18 @@ async function createLingdongVideoTask(config: AiConfig, model: string, prompt: 
 }
 
 async function createCaiStandardVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
     const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
-    assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    assertCaiVideoMode(ruleName, imageUrls, videoUrls, audioUrls, options?.videoMode);
     const ratio = normalizeSeedanceRatio(config.size);
     const payload: Record<string, any> = {
-        model: modelOptionName(model),
+        model: modelName,
         prompt: requestPrompt,
-        duration: normalizeCaiDuration(config.videoSeconds, model),
+        duration: normalizeCaiDuration(config.videoSeconds, ruleName),
         metadata: {
             resolution: normalizeCaiResolution(config.vquality),
             ratio: ratio === "adaptive" ? "16:9" : ratio,
@@ -208,7 +224,7 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
             watermark: boolConfig(config.videoWatermark, false),
         },
     };
-    appendCaiReferences(payload, model, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    appendCaiReferences(payload, ruleName, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -221,19 +237,21 @@ async function createCaiStandardVideoTask(config: AiConfig, model: string, promp
 }
 
 async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     const imageUrls = await Promise.all(references.map((image) => resolveCaiImageUrl(image, options)));
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveCaiMediaUrl(video, "参考视频", options)));
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveCaiMediaUrl(audio, "参考音频", options)));
     const requestPrompt = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
-    assertCaiVideoMode(model, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    assertCaiVideoMode(ruleName, imageUrls, videoUrls, audioUrls, options?.videoMode);
     
-    const duration = normalizeCaiDuration(config.videoSeconds, model);
+    const duration = normalizeCaiDuration(config.videoSeconds, ruleName);
     const ratio = normalizeSeedanceRatio(config.size);
-    const resolution = normalizeSeedanceResolution(config.vquality, modelOptionName(model));
-    const isSeedance = modelOptionName(model).toLowerCase().includes("seedance");
+    const resolution = normalizeSeedanceResolution(config.vquality, ruleName);
+    const isSeedance = ruleName.toLowerCase().includes("seedance");
     
     const payload: Record<string, any> = {
-        model: modelOptionName(model),
+        model: modelName,
         prompt: requestPrompt,
         duration: duration === -1 ? 10 : duration,
         size: ratio === "adaptive" ? "16:9" : ratio,
@@ -252,7 +270,7 @@ async function createCaiSdVideoTask(config: AiConfig, model: string, prompt: str
         payload.resolution = resolution;
     }
 
-    appendCaiReferences(payload, model, imageUrls, videoUrls, audioUrls, options?.videoMode);
+    appendCaiReferences(payload, ruleName, imageUrls, videoUrls, audioUrls, options?.videoMode);
 
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/video/generations"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -371,6 +389,8 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
 }
 
 async function createSeedanceTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     if (audioReferences.length && !references.length && !videoReferences.length) {
         throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
     }
@@ -379,11 +399,11 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences, options);
     if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
     const payload = {
-        model: modelOptionName(model),
+        model: modelName,
         content,
         ratio: normalizeSeedanceRatio(config.size),
-        resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)).toUpperCase(),
-        duration: normalizeSeedanceRequestDuration(config.videoSeconds, model),
+        resolution: normalizeSeedanceResolution(config.vquality, ruleName).toUpperCase(),
+        duration: normalizeSeedanceRequestDuration(config.videoSeconds, ruleName),
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         watermark: boolConfig(config.videoWatermark, false),
     };
@@ -534,8 +554,8 @@ function normalizeCaiResolution(value: string) {
 }
 
 function normalizeLingdongDuration(value: string, model: string) {
-    const duration = normalizeCaiDuration(value, model);
-    if (modelOptionName(model).toLowerCase() === "sora-2") {
+    const duration = normalizeCaiDuration(value, modelApiRuleName(model));
+    if (modelApiRuleName(model).toLowerCase() === "sora-2") {
         if (duration <= 4) return 4;
         if (duration <= 8) return 8;
         return 12;
@@ -545,16 +565,31 @@ function normalizeLingdongDuration(value: string, model: string) {
 
 function appendLingdongSize(payload: Record<string, any>, config: AiConfig, model: string) {
     const ratio = normalizeNewTokenAspectRatio(config.size);
-    if (modelOptionName(model).toLowerCase() === "sora-2") {
+    if (modelApiRuleName(model).toLowerCase() === "sora-2") {
         payload.orientation = ratio === "9:16" || ratio === "3:4" ? "portrait" : ratio === "1:1" ? "square" : "landscape";
         return;
     }
     payload.ratio = ratio;
 }
 
+function modelApiRuleName(value: string) {
+    return modelOptionName(value).replace(/\[(ld|nt|dm|vk)\]$/i, "").trim();
+}
+
+type LingdongReferenceLimits = { images: number; videos: number; audios: number; mediaTotal?: number };
+
+function lingdongReferenceLimits(model: string): LingdongReferenceLimits {
+    const value = modelApiRuleName(model).toLowerCase();
+    if (value === "sora-2") return { images: 1, videos: 0, audios: 0 };
+    if (value === "gpt-image-2") return { images: 6, videos: 0, audios: 0 };
+    if (value === "sd-2-4") return { images: 4, videos: 3, audios: 0, mediaTotal: 4 };
+    if (value === "sd-2-11") return { images: 4, videos: 3, audios: 3 };
+    return { images: 9, videos: 3, audios: 3 };
+}
+
 function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[], videoMode = "text-to-video") {
     const modelName = modelOptionName(model);
-    const lowerModel = modelName.toLowerCase();
+    const lowerModel = modelApiRuleName(modelName).toLowerCase();
     const aspectRatio = normalizeNewTokenAspectRatio(config.size);
     const payload: Record<string, any> = {
         model: modelName,
@@ -630,8 +665,10 @@ function normalizeNewTokenAspectRatio(value: string) {
 }
 
 function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: string, imageUrls: string[], videoUrls: string[], audioUrls: string[]) {
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
     return {
-        model,
+        model: modelName,
         content: [
             { type: "text", text: prompt },
             ...imageUrls.slice(0, SEEDANCE_REFERENCE_LIMITS.images).map((url) => ({ type: "image_url", image_url: { url }, role: "reference_image" })),
@@ -640,25 +677,27 @@ function buildDuomiSeedancePayload(config: AiConfig, model: string, prompt: stri
         ],
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         ratio: normalizeNewTokenAspectRatio(config.size),
-        duration: normalizeCaiDuration(config.videoSeconds, model),
-        resolution: normalizeSeedanceResolution(config.vquality, model).toLowerCase(),
+        duration: normalizeCaiDuration(config.videoSeconds, ruleName),
+        resolution: normalizeSeedanceResolution(config.vquality, ruleName).toLowerCase(),
         watermark: boolConfig(config.videoWatermark, false),
     };
 }
 
 function buildDuomiGrokPayload(config: AiConfig, model: string, prompt: string, imageUrls: string[]) {
-    const duration = isFixedDurationVideoModel(model) ? 15 : Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
+    const modelName = modelOptionName(model);
+    const ruleName = modelApiRuleName(modelName);
+    const duration = isFixedDurationVideoModel(ruleName) ? 15 : Math.max(6, Math.min(30, Math.floor(Number(config.videoSeconds) || 10)));
     const payload: Record<string, any> = {
-        model,
+        model: modelName,
         prompt,
         aspect_ratio: normalizeNewTokenAspectRatio(config.size),
         duration,
         quality: "720p",
     };
-    if (model.toLowerCase().includes("grok-imagine-video-1.5") && imageUrls[0]) {
+    if (ruleName.toLowerCase().includes("grok-imagine-video-1.5") && imageUrls[0]) {
         payload.input_reference = imageUrls[0];
     } else {
-        payload.image_urls = model === "grok-video-1.5" ? imageUrls.slice(0, 1) : imageUrls.slice(0, 7);
+        payload.image_urls = ruleName === "grok-video-1.5" ? imageUrls.slice(0, 1) : imageUrls.slice(0, 7);
     }
     return payload;
 }
